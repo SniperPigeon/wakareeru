@@ -258,52 +258,49 @@ def build_image_records(
 
 # =============== MIME类型过滤 ===============
 
-def purge_non_image_manifest_records(conn: sqlite3.Connection) -> int:
-    """Delete existing DB rows whose MIME is missing or not supported raster image data."""
-    conn.execute(
-        """
-        DELETE FROM image_categories
-        WHERE EXISTS (
-            SELECT 1
-            FROM images
-            WHERE images.file_title = image_categories.file_title
-              AND images.category = image_categories.category
-              AND (
-                  LOWER(COALESCE(images.mime, '')) NOT LIKE 'image/%'
-                  OR LOWER(COALESCE(images.mime, '')) = 'image/svg+xml'
-              )
-        )
-        """
-    )
-    deleted = conn.execute(
+def purge_incremental_non_image_records(
+    conn: sqlite3.Connection,
+    records: list[dict],
+) -> int:
+    """Delete unsupported MIME rows only for records fetched in the current crawl."""
+    rejected = [
+        record
+        for record in records
+        if not str(record.get("mime") or "").lower().startswith("image/")
+        or str(record.get("mime") or "").lower() == "image/svg+xml"
+    ]
+    if not rejected:
+        return 0
+
+    deleted = conn.executemany(
         """
         DELETE FROM images
-        WHERE LOWER(COALESCE(mime, '')) NOT LIKE 'image/%'
-           OR LOWER(COALESCE(mime, '')) = 'image/svg+xml'
-        """
+        WHERE series = ? AND category = ? AND file_title = ?
+        """,
+        [
+            (record["series"], record["category"], record["file_title"])
+            for record in rejected
+        ],
     ).rowcount
+
+    category_memberships = {
+        (record["file_title"], record["category"])
+        for record in rejected
+    }
+    conn.executemany(
+        """
+        DELETE FROM image_categories
+        WHERE file_title = ? AND category = ?
+          AND NOT EXISTS (
+              SELECT 1 FROM images
+              WHERE images.file_title = image_categories.file_title
+                AND images.category = image_categories.category
+          )
+        """,
+        category_memberships,
+    )
     conn.commit()
     return deleted
-
-
-def apply_mime_filter_to_manifest_db(db_path: str = IMAGE_DB_PATH) -> dict[str, int]:
-    """Apply the image-only MIME filter directly to the manifest database."""
-    conn = utils.connect_db(db_path)
-    try:
-        before = conn.execute("SELECT COUNT(*) FROM images").fetchone()[0]
-        non_image = conn.execute(
-            """
-            SELECT COUNT(*)
-            FROM images
-            WHERE LOWER(COALESCE(mime, '')) NOT LIKE 'image/%'
-               OR LOWER(COALESCE(mime, '')) = 'image/svg+xml'
-            """
-        ).fetchone()[0]
-        deleted = purge_non_image_manifest_records(conn)
-        after = conn.execute("SELECT COUNT(*) FROM images").fetchone()[0]
-        return {"before": before, "non_image": non_image, "deleted": deleted, "after": after}
-    finally:
-        conn.close()
 
 
 def upsert_image_records(
@@ -640,6 +637,9 @@ def crawl_root_manifest_sample(
             all_records.extend(records)
             logger.info('%s：Category:%s -> 本次新增/更新 %d 个文件', row["series"], root_category, len(records))
 
+        purged = purge_incremental_non_image_records(conn, all_records)
+        logger.info("MIME 增量过滤：从本次抓取记录中移除 %d 条非图片", purged)
+
     finally:
         conn.close()
 
@@ -692,15 +692,6 @@ def main(config_override=None):
         reprocess=reprocess,
     )
     logger.info("本次 manifest 爬取获得 %d 条原始记录", len(sample_manifest))
-
-    filter_result = apply_mime_filter_to_manifest_db(db_path)
-    logger.info(
-        "MIME 过滤完成：过滤前 %d 条；非图片 %d 条；删除 %d 条；过滤后 %d 条",
-        filter_result["before"],
-        filter_result["non_image"],
-        filter_result["deleted"],
-        filter_result["after"],
-    )
     
 if __name__ == "__main__":
     main()
