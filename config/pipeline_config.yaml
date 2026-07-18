@@ -7,8 +7,8 @@ path:
   db_path: "commons_image_manifest.sqlite"
   raw_img_dir: "img"
   cache_dir: "cache"
-  series_list_path: 'jr_east_freight_series.csv'
-  series_commons_path: 'jr_east_freight_series_wiki_commons.csv'
+  series_list_path: 'jr_honshu_freight_series.csv'
+  series_commons_path: 'jr_honshu_series_wiki_commons.csv'
   commons_review_path: 'review/commons_root_review.csv'
   manual_series_overrides_path: 'config/manual_series_overrides.csv'
   img_crawl_log_path: 'img_crawl_checkpoint.csv'
@@ -25,7 +25,7 @@ crawler:
   # Only active operators will be parsed and included in the final dataset. 
   # However, shared series with other operators will still be included 
   # even if the operator is not active.
-  active_operators: ["JR東日本", "JR貨物"]
+  active_operators: ["JR東日本", "JR貨物", "JR東海", "JR西日本"]
   full_series_crawling: true
   manifest_max_files_per_category: 50
   # 0 = only root category; positive numbers recurse into subcategories; -1 = unlimited.
@@ -42,8 +42,7 @@ crawler:
   
   download_max_retries: 3
 
-  series_test_scope: ["E231系", "キハ40系", "EF510形", "DD51形", "C57形", "キハ141系","E233系", "E353系", "E657系", "E5系", "E6系", "EF64形", "E7系",'EF81形','E235系','キハ110系',
-        '113系','485系','E217系','E257系']
+  series_test_scope: ["N700S系"]
 
 # Img filtering configuration
 image_filtering:
@@ -75,8 +74,8 @@ gdino:
   box_threshold: 0.2
   text_threshold: 0.2
   nms_iou_threshold: 0.5
-  batch_size: 4
-  outer_batch_size: 80
+  batch_size: 6
+  outer_batch_size: 36
   reprocess: false
 
 crop_filtering:
@@ -224,7 +223,7 @@ trainer:
       epochs: 30
       use_feature_cache: true
       feature_cache_file_name: "linear_head_alpha_features.pt"
-      feature_cache_rebuild: false
+      feature_cache_rebuild: true
       feature_cache_amp_enabled: false
       learning_rate: 1e-3
       weight_decay: 1e-4
@@ -237,7 +236,7 @@ trainer:
     # "latest_best" / "latest" = trainer.latest_run_pointer指向的最新run中最后一个phase的best checkpoint。
     # 也可以填写相对path.data_root的具体checkpoint路径。
     checkpoint_path: "latest_best"
-    output_dir: "model/wakareeru-0.1.1-alpha.1"
-    artifact_version: "0.1.1-alpha.1"
+    output_dir: "model/wakareeru-0.2.0-alpha.1"
+    artifact_version: "0.2.0-alpha.1"
     force: false
   

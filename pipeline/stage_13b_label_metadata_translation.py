@@ -121,7 +121,9 @@ def load_label_candidates(conn: sqlite3.Connection, label_column: str) -> pd.Dat
                 i.series
             ) AS label_ja,
             i.series AS source_series,
-            i.wiki_title AS wiki_title_ja
+            i.wiki_title AS wiki_title_ja,
+            i.operator_jp,
+            i.operator_en
         FROM crops c
         JOIN images i ON i.id = c.image_id
         """,
@@ -132,7 +134,7 @@ def load_label_candidates(conn: sqlite3.Connection, label_column: str) -> pd.Dat
     return rows
 
 
-def _canonical_operator_lookup(conn: sqlite3.Connection) -> dict[str, dict[str, list[str]]]:
+def _operator_translation_lookup(conn: sqlite3.Connection) -> dict[str, tuple[str, str]]:
     metadata = pd.read_sql_query(
         """
         SELECT label_ja, operator_ja_json, operator_en_json, operator_zh_json
@@ -140,9 +142,9 @@ def _canonical_operator_lookup(conn: sqlite3.Connection) -> dict[str, dict[str, 
         """,
         conn,
     )
-    lookup = {}
+    lookup: dict[str, tuple[str, str]] = {}
     for row in metadata.itertuples(index=False):
-        lookup[row.label_ja] = {
+        operators = {
             language: _parse_json_array(
                 getattr(row, f"operator_{language}_json"),
                 label_ja=row.label_ja,
@@ -150,6 +152,63 @@ def _canonical_operator_lookup(conn: sqlite3.Connection) -> dict[str, dict[str, 
             )
             for language in ("ja", "en", "zh")
         }
+        if len({len(values) for values in operators.values()}) != 1:
+            raise ValueError(f"{row.label_ja!r} 的三语operator数组长度不一致")
+        for operator_ja, operator_en, operator_zh in zip(
+            operators["ja"], operators["en"], operators["zh"], strict=True
+        ):
+            translated = (operator_ja, operator_zh)
+            existing = lookup.get(operator_en)
+            if existing is not None and existing != translated:
+                raise ValueError(
+                    f"operator英文名 {operator_en!r} 对应多个日中译名: "
+                    f"{existing!r} / {translated!r}"
+                )
+            lookup[operator_en] = translated
+    return lookup
+
+
+def build_observed_operator_lookup(
+    candidates: pd.DataFrame,
+    translations: dict[str, tuple[str, str]],
+) -> dict[str, dict[str, list[str]]]:
+    """Aggregate Stage 06 operator pairs for each current effective label."""
+    observed = candidates[["label_ja", "operator_jp", "operator_en"]].copy()
+    for column in observed.columns:
+        observed[column] = observed[column].map(_clean_text)
+    observed = observed[
+        observed["label_ja"].ne("")
+        & observed["operator_jp"].ne("")
+        & observed["operator_en"].ne("")
+    ]
+
+    lookup: dict[str, dict[str, list[str]]] = {}
+    for (label_ja, operator_en), rows in observed.groupby(
+        ["label_ja", "operator_en"], sort=True
+    ):
+        canonical = translations.get(operator_en)
+        if canonical is not None:
+            rows = rows[rows["operator_jp"].eq(canonical[0])]
+            if rows.empty:
+                logger.warning(
+                    "%s 的 Stage 06 operator %s 没有匹配规范日文名 %s，已忽略",
+                    label_ja,
+                    operator_en,
+                    canonical[0],
+                )
+                continue
+
+        counts = rows["operator_jp"].value_counts()
+        max_count = counts.max()
+        operator_ja = sorted(counts[counts.eq(max_count)].index)[0]
+        operator_zh = canonical[1] if canonical is not None else ""
+        operators = lookup.setdefault(
+            label_ja,
+            {"ja": [], "en": [], "zh": []},
+        )
+        operators["ja"].append(operator_ja)
+        operators["en"].append(operator_en)
+        operators["zh"].append(operator_zh)
     return lookup
 
 
@@ -164,26 +223,18 @@ def build_translation_queue(
         source_series = sorted(
             value for value in label_rows["source_series"].map(_clean_text).unique() if value
         )
-        inherited = {"ja": [], "en": [], "zh": []}
-        seen_ja: set[str] = set()
-        for series in source_series:
-            operators = operator_lookup.get(series)
-            if operators is None:
-                continue
-            for index, operator_ja in enumerate(operators["ja"]):
-                if operator_ja in seen_ja:
-                    continue
-                seen_ja.add(operator_ja)
-                for language in ("ja", "en", "zh"):
-                    inherited[language].append(operators[language][index])
+        observed = operator_lookup.get(
+            label_ja,
+            {"ja": [], "en": [], "zh": []},
+        )
         queue_rows.append(
             {
                 "label_ja": label_ja,
                 "label_en": "",
                 "label_zh": "",
-                "operator_ja_json": json.dumps(inherited["ja"], ensure_ascii=False),
-                "operator_en_json": json.dumps(inherited["en"], ensure_ascii=False),
-                "operator_zh_json": json.dumps(inherited["zh"], ensure_ascii=False),
+                "operator_ja_json": json.dumps(observed["ja"], ensure_ascii=False),
+                "operator_en_json": json.dumps(observed["en"], ensure_ascii=False),
+                "operator_zh_json": json.dumps(observed["zh"], ensure_ascii=False),
                 "wiki_title_ja": _most_common_text(label_rows["wiki_title_ja"]),
                 "source_series": json.dumps(source_series, ensure_ascii=False),
                 "note": "",
@@ -208,7 +259,8 @@ def main(config: dict | None = None) -> int:
             row[0] for row in conn.execute("SELECT label_ja FROM label_metadata")
         }
         missing_labels = set(candidates["label_ja"]) - existing_labels
-        operator_lookup = _canonical_operator_lookup(conn)
+        operator_translations = _operator_translation_lookup(conn)
+        operator_lookup = build_observed_operator_lookup(candidates, operator_translations)
 
         existing_review = pd.DataFrame(columns=TRANSLATION_COLUMNS)
         if review_path.exists():
@@ -247,7 +299,8 @@ def main(config: dict | None = None) -> int:
             conn.commit()
             imported_labels = {row[0] for row in import_rows}
             missing_labels -= imported_labels
-            operator_lookup = _canonical_operator_lookup(conn)
+            operator_translations = _operator_translation_lookup(conn)
+            operator_lookup = build_observed_operator_lookup(candidates, operator_translations)
             logger.info("已将%d条完整翻译写入label_metadata。", len(import_rows))
 
         fresh_queue = build_translation_queue(candidates, missing_labels, operator_lookup)

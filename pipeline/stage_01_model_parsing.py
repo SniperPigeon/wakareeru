@@ -54,11 +54,13 @@ async def fetch_all(operators: list[tuple[str, str, str]]) -> dict[str, tuple[st
 def parse_vehicle_wikitext(lines: list[str]) -> list[dict]:
     link_re = re.compile(r'\[\[([^\]|]+)(?:\|([^\]]+))?\]\]')
 
-    # 首字符允许数字，覆盖 113系/271系 等纯数字开头的 JR West/Central 型号
+    # 保留既有车型格式，并补充 0系及 N700S系等数字后的字母后缀车型。
     series_re = re.compile(
-        r'^[A-Za-z゠-ヿ一-鿿\d]'  # 首字符（含数字）
-        r'[A-Za-z゠-ヿ一-鿿\-]*'   # 前缀（含连字符，如HB-E）
-        r'\d+(?:系|形)?$'           # 数字结尾，可选系/形
+        r'^(?:'
+        r'[A-Za-z゠-ヿ一-鿿\d][A-Za-z゠-ヿ一-鿿\-]*\d+(?:系|形)?'
+        r'|[A-Za-z゠-ヿ一-鿿\-]*\d+[A-Za-z]+(?:系|形)'
+        r'|\d(?:系|形)'
+        r')$'
     )
 
     results = []
@@ -217,7 +219,11 @@ def main(config = None):
     filtered_df = all_df[~all_df['type'].isin(excluding_types)]
     #现在滤除二级，对象为旧式营业车和事业用车
     exclduing_subtypes = constants.EXCLUDED_SUBTYPES
-    final_df = filtered_df[~filtered_df['subtype'].isin(exclduing_subtypes)]
+    filtered_df = filtered_df[~filtered_df['subtype'].isin(exclduing_subtypes)]
+    excluding_statuses = constants.EXCLUDED_STATUSES
+    excluded_status = filtered_df['status'].isin(excluding_statuses)
+    status_exception = filtered_df['series'].isin(constants.EXCLUDED_STATUS_SERIES_EXCEPTIONS)
+    final_df = filtered_df[~excluded_status | status_exception]
     final_df['type'].value_counts()
     final_df['subtype'].value_counts()
 
