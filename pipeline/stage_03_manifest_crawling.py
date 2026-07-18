@@ -371,25 +371,6 @@ def upsert_image_records(
     conn.commit()
 
 
-def get_category_fetch_status(conn: sqlite3.Connection, category: str) -> str | None:
-    row = conn.execute(
-        "SELECT fetch_status FROM categories WHERE category = ?",
-        (category,),
-    ).fetchone()
-    return row[0] if row else None
-
-
-def should_fetch_category_files(
-    conn: sqlite3.Connection,
-    category: str,
-    reprocess: bool = False,
-) -> bool:
-    """Return whether the direct file manifest for one category should be crawled."""
-    if reprocess:
-        return True
-    return get_category_fetch_status(conn, category) != constants.FETCH_STATUS_OK
-
-
 def subtree_remaining_depth(depth: int, max_depth: int) -> int:
     """Return how many descendant levels must be complete below this category."""
     if max_depth == -1:
@@ -503,10 +484,11 @@ def crawl_category_records_with_checkpoint(
     visited_categories: dict[str, int],
     reprocess: bool = False,
 ) -> tuple[list[dict], bool]:
-    """Crawl one category subtree, skipping already fetched category file manifests.
+    """Crawl one category subtree using checkpoints scoped to the current series.
 
-    Direct-file and completed-subtree checkpoints are separate. A completed subtree
-    skips remote child discovery only when it covers the requested relative depth.
+    A completed subtree skips remote discovery only when it covers the requested
+    relative depth. Otherwise its direct files are fetched and upserted for the
+    current series, even if another series has already visited the category.
     """
     remaining_depth = subtree_remaining_depth(depth, max_depth)
     completed_depth = get_subtree_checkpoint_depth(
@@ -537,24 +519,21 @@ def crawl_category_records_with_checkpoint(
     )
     parent_category = path[-2] if len(path) > 1 else None
 
-    if should_fetch_category_files(conn, category, reprocess=reprocess):
-        category_records = build_image_records(
-            row,
-            category,
-            max_files=max_files_per_category,
-            category_path=path,
-        )
-        upsert_image_records(
-            conn,
-            category,
-            category_records,
-            source_scope=source_scope,
-            parent_category=parent_category,
-        )
-        records.extend(category_records)
-        logger.info("depth=%d Category:%s -> %d 个文件", depth, category, len(category_records))
-    else:
-        logger.info("depth=%d Category:%s -> 已有 checkpoint，跳过直接文件 manifest", depth, category)
+    category_records = build_image_records(
+        row,
+        category,
+        max_files=max_files_per_category,
+        category_path=path,
+    )
+    upsert_image_records(
+        conn,
+        category,
+        category_records,
+        source_scope=source_scope,
+        parent_category=parent_category,
+    )
+    records.extend(category_records)
+    logger.info("depth=%d Category:%s -> %d 个文件", depth, category, len(category_records))
 
     if max_depth != -1 and depth >= max_depth:
         mark_subtree_checkpoint(
