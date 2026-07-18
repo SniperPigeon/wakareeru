@@ -223,7 +223,7 @@ trainer:
       epochs: 30
       use_feature_cache: true
       feature_cache_file_name: "linear_head_alpha_features.pt"
-      feature_cache_rebuild: false
+      feature_cache_rebuild: true
       feature_cache_amp_enabled: false
       learning_rate: 1e-3
       weight_decay: 1e-4
@@ -236,7 +236,7 @@ trainer:
     # "latest_best" / "latest" = trainer.latest_run_pointer指向的最新run中最后一个phase的best checkpoint。
     # 也可以填写相对path.data_root的具体checkpoint路径。
     checkpoint_path: "latest_best"
-    output_dir: "model/wakareeru-0.1.1-alpha.1"
-    artifact_version: "0.1.1-alpha.1"
+    output_dir: "model/wakareeru-0.2.0-alpha.1"
+    artifact_version: "0.2.0-alpha.1"
     force: false
   
