@@ -633,7 +633,7 @@ def main(config: dict | None = None) -> None:
             labels=labels,
             crops_storage_config=crops_storage_config,
         )
-
+        #TODO 在元数据中保留最大的series,以方便后期利用及向客户端展示。推理端可能用子型号倒查母型号更好实现
         logger.info("crop图像保存完成，已成功保存%d条crop数据。", len(metadata))
         logger.info("metadata已保存至%s，labels已保存至%s，manifest已保存至%s。", metadata_path, labels_path, manifest_path)
         exported_l10n_count = write_l10n_metadata(

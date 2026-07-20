@@ -76,3 +76,38 @@ def test_subtree_checkpoint_keeps_deepest_completed_depth() -> None:
     assert stage_03.get_subtree_checkpoint_depth(
         conn, "0系", "Shinkansen 0", "Shinkansen 0"
     ) == -1
+
+
+def test_shared_category_is_fetched_for_each_series(monkeypatch) -> None:
+    conn = _checkpoint_conn()
+    fetched_series: list[str] = []
+    upserted_series: list[str] = []
+
+    def fake_build_image_records(row, category, max_files, category_path):
+        fetched_series.append(row["series"])
+        return [{"series": row["series"], "category": category}]
+
+    def fake_upsert_image_records(conn, category, records, **kwargs):
+        upserted_series.extend(record["series"] for record in records)
+
+    monkeypatch.setattr(stage_03, "build_image_records", fake_build_image_records)
+    monkeypatch.setattr(stage_03, "upsert_image_records", fake_upsert_image_records)
+    monkeypatch.setattr(stage_03, "fetch_subcategories", lambda category: [])
+
+    for series in ("481系", "485系"):
+        records, complete = stage_03.crawl_category_records_with_checkpoint(
+            conn=conn,
+            row=pd.Series({"series": series, "commons_root_category": "JNR 485"}),
+            category="JNR 485",
+            path=["JNR 485"],
+            depth=0,
+            max_depth=0,
+            max_files_per_category=50,
+            visited_categories={},
+        )
+
+        assert records == [{"series": series, "category": "JNR 485"}]
+        assert complete is True
+
+    assert fetched_series == ["481系", "485系"]
+    assert upserted_series == ["481系", "485系"]
