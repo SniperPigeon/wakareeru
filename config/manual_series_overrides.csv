@@ -39,3 +39,4 @@ DD18形,JR東日本DD18形ディーゼル機関車,exclude,,,,,,,,,,no Commons r
 901系,JR東日本209系電車,exclude,,,,,,,,,,covered by 209系; old crawler skipped rootless row
 クモヤ743形,JR東日本クモヤ743形電車,exclude,,,,,,,,,,no Commons root; old crawler skipped rootless rows
 ED500形,JR貨物ED500形電気機関車,exclude,,,,,,,,,,no Commons root; old crawler skipped rootless rows
+285系,JR西日本285系電車,set,,,,"['JR東海', 'JR西日本']","['JR Central', 'JR West']",JR West 285,JR West/Central 285,"{'JR Central': 'JR West/Central 285', 'JR West': 'JR West/Central 285'}",False,root name doesn't follow rules.

@@ -1,4 +1,5 @@
 series,submodel,bandai,special_formation,special_livery,operator_en,fine_grained_series,
+国鉄DF50形,,,,,,DF50形,
 ,E233-2000,,,,,E233-2000(貫通型),
 E257系,E257-5500,,,,,E257系-5000・5500番台,
 E257系,E257-5000,,,,,E257系-5000・5500番台,
@@ -113,6 +114,13 @@ N700S系,,8000,,,,N700S系-8000番台(かもめ),
 キハ183系,,,Niseko Express,,,キハ183系(ニセコエクスプレス),
 キハ183系,,,Yufu DX,,,キハ183系(ゆふDX),
 
+キハ185系,,,Shikoku Mannaka Sennen Monogatari,,,キハ185系(四国まんなか千年ものがたり),
+キハ185系,,,Iyonada Monogatari,,,キハ185系(伊予灘ものがたり),
+キハ185系,,,Tosa Toki no Yoake no Monogatari,,,キハ185系(志国土佐 時代の夜明けのものがたり),
+キハ185系,,,A-Train,,,キハ185系(A列車で行こう),
+キハ185系,,,Ai Yoshinogawa Torokko,,,キハ185系(藍よしのがわトロッコ),
+
+
 キハ125形,,400,Umisachi-Yamasachi,,,キハ125形(海幸山幸),
 キハ32形,,,Tetsudo Hobby Train,,,キハ32形(鉄道ホビートレイン),
 787系,,,36plus3,,,787系(36ぷらす3),
@@ -121,3 +129,5 @@ N700S系,,8000,,,,N700S系-8000番台(かもめ),
 
 E5系,,,,,,E5系・H5系,
 H5系,,,,,,E5系・H5系,
+
+912形,,,,,,DD13/新幹線912形,
