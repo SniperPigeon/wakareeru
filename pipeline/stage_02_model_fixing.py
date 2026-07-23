@@ -201,11 +201,17 @@ def _load_commons_cache(path: str | os.PathLike) -> dict[tuple[str, str], dict]:
     return cache
 
 
-def _cached_commons_result(row: pd.Series, cache: dict[tuple[str, str], dict]) -> dict | None:
+def _cached_commons_result(
+    row: pd.Series,
+    cache: dict[tuple[str, str], dict],
+    empty_cached_roots: set[str] | None = None,
+) -> dict | None:
     cached = cache.get(_row_key(row))
     if not cached:
         return None
     if cached.get("commons_root_decision") == MISSING_CACHE_DECISION:
+        return None
+    if cached.get("commons_root_category") in (empty_cached_roots or set()):
         return None
     return {col: cached.get(col) for col in COMMONS_COLUMNS}
 
@@ -323,6 +329,73 @@ def fetch_commons_categories(prefix: str, limit: int = 20) -> list[str] | None:
     return [r["*"] for r in data.get("query", {}).get("allcategories", [])]
 
 
+def fetch_commons_category_info(categories: list[str]) -> dict[str, dict[str, int]] | None:
+    """Return direct file/subcategory counts for Commons categories."""
+    categories = _dedupe([category for category in categories if category])
+    category_info: dict[str, dict[str, int]] = {}
+    for start in range(0, len(categories), 50):
+        batch = categories[start : start + 50]
+        data = _commons_query(
+            {
+                "action": "query",
+                "titles": "|".join(f"Category:{category}" for category in batch),
+                "prop": "categoryinfo",
+                "format": "json",
+            }
+        )
+        if data is None:
+            return None
+
+        for page in data.get("query", {}).get("pages", {}).values():
+            category = page.get("title", "").removeprefix("Category:")
+            if not category:
+                continue
+            info = page.get("categoryinfo", {})
+            category_info[category] = {
+                "files": int(info.get("files", 0)),
+                "subcats": int(info.get("subcats", 0)),
+            }
+
+    return category_info
+
+
+def partition_commons_categories_by_content(
+    categories: list[str],
+) -> tuple[list[str], list[str]] | None:
+    """Split categories into crawlable and empty based on files/subcategories."""
+    category_info = fetch_commons_category_info(categories)
+    if category_info is None:
+        return None
+
+    crawlable = []
+    empty = []
+    for category in categories:
+        info = category_info.get(category)
+        if info is None:
+            crawlable.append(category)
+        elif info["files"] > 0 or info["subcats"] > 0:
+            crawlable.append(category)
+        else:
+            empty.append(category)
+    return crawlable, empty
+
+
+def find_empty_cached_roots(cache: dict[tuple[str, str], dict]) -> set[str]:
+    roots = _dedupe(
+        [
+            str(cached.get("commons_root_category", "")).strip()
+            for cached in cache.values()
+            if str(cached.get("commons_root_category", "")).strip()
+        ]
+    )
+    partition = partition_commons_categories_by_content(roots)
+    if partition is None:
+        logger.warning("Commons root 缓存有效性检查失败；本次继续复用既有映射")
+        return set()
+    _, empty = partition
+    return set(empty)
+
+
 def fetch_parent_categories(category: str) -> list[str] | None:
     params = {
         "action": "query",
@@ -415,6 +488,7 @@ def choose_commons_root(series_label: str, prefix: str, candidates: list[str]) -
 
 def _find_root_from_prefixes(series_label: str, prefixes: list[str], category_limit: int = 20) -> dict:
     all_candidates = []
+    empty_candidates = []
     fallback = None
 
     for prefix in prefixes:
@@ -425,7 +499,25 @@ def _find_root_from_prefixes(series_label: str, prefixes: list[str], category_li
         if not candidates:
             continue
 
+        partition = partition_commons_categories_by_content(candidates)
+        if partition is not None:
+            candidates, empty = partition
+            empty_candidates.extend(empty)
+            if empty:
+                logger.info(
+                    "%s：忽略无文件且无子分类的 Commons 分类：%s",
+                    series_label,
+                    empty,
+                )
+        if not candidates:
+            continue
+
         chosen = choose_commons_root(series_label, prefix, candidates)
+        if empty_candidates:
+            chosen["decision"] = (
+                f"忽略空分类：{', '.join(_dedupe(empty_candidates))}；"
+                f"{chosen['decision']}"
+            )
         result = {
             "commons_prefix": prefix,
             "commons_root_category": chosen["root"],
@@ -441,11 +533,19 @@ def _find_root_from_prefixes(series_label: str, prefixes: list[str], category_li
         fallback["commons_candidates"] = _dedupe(all_candidates)
         return fallback
 
+    all_candidates = _dedupe(all_candidates)
+    all_candidates_are_empty = bool(all_candidates) and set(all_candidates).issubset(
+        set(empty_candidates)
+    )
     return {
         "commons_prefix": prefixes[0] if prefixes else "",
         "commons_root_category": None,
-        "commons_root_decision": "前缀未返回分类",
-        "commons_candidates": _dedupe(all_candidates),
+        "commons_root_decision": (
+            "候选分类均为空（无文件且无子分类）"
+            if all_candidates_are_empty
+            else "前缀未返回分类"
+        ),
+        "commons_candidates": all_candidates,
         "needs_review": True,
     }
 
@@ -512,6 +612,7 @@ def main(config=None):
     manual_overrides = load_manual_overrides(config["path"].get("manual_series_overrides_path"))
     series_commons_path = utils.join_data_root(config["path"]["series_commons_path"], config=config)
     commons_cache = _load_commons_cache(series_commons_path)
+    empty_cached_roots = find_empty_cached_roots(commons_cache)
     all_model = pd.read_csv(
         utils.join_data_root(config["path"]["series_list_path"], config=config),
         encoding="utf-8",
@@ -527,13 +628,23 @@ def main(config=None):
         before_manual - len(all_model),
     )
     logger.info("已读取 Commons 缓存：%d 行", len(commons_cache))
+    if empty_cached_roots:
+        logger.info(
+            "Commons 缓存中发现 %d 个空 root；对应车型将重新匹配：%s",
+            len(empty_cached_roots),
+            sorted(empty_cached_roots),
+        )
 
     root_rows = []
     fetched_count = 0
     cached_count = 0
     for _, row in all_model.iterrows():
         manual = _manual_for_row(row, manual_overrides)
-        cached = _cached_commons_result(row, commons_cache)
+        cached = _cached_commons_result(
+            row,
+            commons_cache,
+            empty_cached_roots=empty_cached_roots,
+        )
         should_fetch = manual is not None or cached is None
 
         if should_fetch:
