@@ -20,7 +20,7 @@
   当 `noise_review_label = wrong_label` 且正确标签在当前 label space 内时，由 Gradio 的 `Correct label` 下拉框写入。
 
 - `crops.noise_predicted_label` / `noise_predicted_prob`
-  `stage_13` 对未人工复核样本的 LR 噪声预测结果。若 `lr_prediction.sync_to_db=false`，预测结果保存在当前 loss round 的 `lr_predictions.csv`。
+  `stage_13` 对未人工复核样本的 LR 噪声预测结果。预测 CSV 始终保存在当前 loss round；`lr_prediction.sync_to_db=true` 时同时写入数据库。最终数据集导出只读取数据库字段。
 
 - `data/loss_analysis/latest_loss_analysis_round.txt`
   指向最近一次完整完成 `stage_10` 训练产物的 loss round。`stage_10` 只在 loss history、epoch history 和 checkpoint 都保存后才更新该指针。
@@ -59,7 +59,7 @@ stage_12 logistic_regression_filter
 
 stage_13 lr_prediction
   - 使用本轮 LR 模型对未人工复核样本预测 wrong_label 噪声概率
-  - 可写入 DB，也可只写入本轮 lr_predictions.csv
+  - 写入本轮 lr_predictions.csv，并在 sync_to_db=true 时同步到 DB
 
 下一轮 stage_10
   - 以上一轮 DB 预测字段或上一轮 lr_predictions.csv 为依据排除预测噪声
@@ -118,6 +118,8 @@ stage_13 lr_prediction
 
 如果预测 CSV 不存在，`stage_10` 会跳过预测噪声过滤；如果 CSV 缺必要列，则直接报错。
 
+最终 `stage_14_store_crops.py` 不读取轮次 CSV；`crops_storage.selection_mode=filtered` 时只使用数据库中的预测字段。启用最终导出的预测噪声过滤时，配置必须保持 `lr_prediction.sync_to_db=true`；`selection_mode=all` 不执行该过滤。
+
 ## 修改 Stage 8 Label Space 后的重跑
 
 `stage_08_fine_grain_series.py` 会更新 DB 中的 `images.fine_grained_series`。如果只修改了细粒度标签规则或 `manual_fine_grained_series.csv`，DINO feature cache 通常仍然可复用，因为 `stage_09` 只缓存 crop 图像特征和 `crop_id`，不绑定标签体系。
@@ -155,10 +157,11 @@ noise_detection:
 
 ## 最终导出
 
-`stage_14_store_crops.py` 导出最终数据集时：
+`stage_14_store_crops.py` 以 `crops_storage.selection_mode=filtered` 导出最终数据集时：
 
-- 先按配置过滤人工噪声和预测噪声。
-- 有 `manual_corrected_label` 的样本不会因为旧预测噪声而被过滤。
+- 先按配置过滤人工噪声，再读取 `crops.noise_predicted_label` / `noise_predicted_prob` 过滤预测噪声。
+- 人工复核为 `ok` 或有 `manual_corrected_label` 的样本不会因为旧预测噪声而被过滤。
+- 没有数据库预测的新 crop 默认保留。
 - 导出标签优先使用 `manual_corrected_label`。
 - 人工纠正样本会按 `crops_storage.manual_correction_invalidate_metadata_columns` 清空原图分类路径派生的细节 metadata，避免旧标签语境下的番台、运营公司、特殊编成或特殊涂装继续污染导出。随后会从未纠正的同 label 导出候选中保守反查补齐：`manual_correction_refill_operator_columns` 中的 operator 字段只有唯一非空值时补齐；`manual_correction_refill_submodel_bandai_columns` 作为一对，只有唯一非空组合时才一起补齐。
 - `metadata.manual_reviewed` 仍只表示人工复核为 `ok` 的高确信样本；人工纠正样本的正确标签通过 `label` 字段体现。

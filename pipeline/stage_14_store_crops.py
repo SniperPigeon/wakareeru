@@ -1,5 +1,4 @@
 import json
-import os
 import re
 import sqlite3
 import time
@@ -11,11 +10,6 @@ from tqdm.auto import tqdm
 
 import constants
 import utils
-
-import joblib
-from sklearn.pipeline import Pipeline
-from sklearn.linear_model import LogisticRegression
-from lr_model import register_legacy_main_alias
 
 logger = utils.get_logger("stage_14_store_crops")
 
@@ -31,9 +25,6 @@ def resolve_crop_selection_mode(crops_storage_config: dict) -> str:
             f"{sorted(CROP_SELECTION_MODES)}"
         )
     return selection_mode
-
-
-
 
 
 def label_to_ascii(label: str, fallback: str = "label") -> str:
@@ -382,8 +373,8 @@ def write_dataset_manifest(
             "exclude_predicted_noise": (
                 filters_enabled and crops_storage_config["exclude_predicted_noise"]
             ),
-            "noise_prediction_round": crops_storage_config["noise_prediction_round"],
-            "noise_prediction_file_name": crops_storage_config["noise_prediction_file_name"],
+            "prediction_source": "crops.noise_predicted_label/noise_predicted_prob",
+            "human_review_overrides_prediction": True,
             "predicted_noise_labels": crops_storage_config["predicted_noise_labels"],
             "predicted_noise_min_prob": crops_storage_config["predicted_noise_min_prob"],
             "manual_correction_invalidate_metadata_columns": crops_storage_config[
@@ -404,21 +395,42 @@ def write_dataset_manifest(
     )
 
 
-def load_noise_predictions(config: dict, crops_storage_config: dict) -> pd.DataFrame:
-    prediction_round = crops_storage_config["noise_prediction_round"]
-    prediction_dir = utils.get_loss_round_dir(
-        config=config,
-        active_round=prediction_round,
-    )
-    prediction_path = prediction_dir / crops_storage_config["noise_prediction_file_name"]
-    if not prediction_path.exists():
-        raise FileNotFoundError(f"Expected LR prediction CSV not found: {prediction_path}")
-    predictions = pd.read_csv(prediction_path)
-    required_columns = {"crop_id", "noise_predicted_prob", "noise_predicted_label"}
-    missing_columns = required_columns - set(predictions.columns)
+def build_db_predicted_noise_mask(
+    metadata: pd.DataFrame,
+    *,
+    corrected_mask: pd.Series,
+    crops_storage_config: dict,
+) -> pd.Series:
+    required_columns = {
+        "noise_review_label",
+        "noise_predicted_prob",
+        "noise_predicted_label",
+    }
+    missing_columns = required_columns - set(metadata.columns)
     if missing_columns:
-        raise ValueError(f"LR prediction CSV missing columns: {sorted(missing_columns)}")
-    return predictions
+        raise ValueError(f"crop数据库预测字段缺失: {sorted(missing_columns)}")
+
+    review_label = (
+        metadata["noise_review_label"].fillna("").astype(str).str.strip()
+    )
+    predicted_prob = pd.to_numeric(
+        metadata["noise_predicted_prob"],
+        errors="coerce",
+    ).fillna(0.0)
+    human_override = (
+        review_label.eq(constants.NOISE_REVIEW_LABEL_OK)
+        | corrected_mask.astype(bool)
+    )
+    return (
+        metadata["noise_predicted_label"].isin(
+            set(crops_storage_config["predicted_noise_labels"])
+        )
+        & (
+            predicted_prob
+            >= float(crops_storage_config["predicted_noise_min_prob"])
+        )
+        & ~human_override
+    )
 
 
 def main(config: dict | None = None) -> None:
@@ -430,14 +442,20 @@ def main(config: dict | None = None) -> None:
     crops_storage_config = config["crops_storage"]
     selection_mode = resolve_crop_selection_mode(crops_storage_config)
     export_all_crops = selection_mode == "all"
-    
+    if (
+        not export_all_crops
+        and crops_storage_config["exclude_predicted_noise"]
+        and not config["lr_prediction"]["sync_to_db"]
+    ):
+        raise ValueError(
+            "store_crops使用crops表中的LR预测字段过滤，"
+            "要求lr_prediction.sync_to_db=true"
+        )
+
     if crops_storage_config["reprocess"]:
         logger.info("crops_storage配置为reprocess=true，将重新裁剪所有入选crop图像")
     else:
         logger.info("crops_storage配置为reprocess=false，将复用已存在的crop图像并只补齐缺失文件")
-            
-        
-
     if crops_storage_config["format"] == "flatten":
         with sqlite3.connect(db_path) as conn:
             metadata_columns = list(crops_storage_config["image_metadata_columns"])
@@ -451,6 +469,9 @@ def main(config: dict | None = None) -> None:
                     c.crop_path,
                     c.noise_review_label,
                     c.manual_corrected_label,
+                    c.noise_predicted_prob,
+                    c.noise_predicted_label,
+                    c.noise_prediction_model,
                     CASE
                         WHEN c.noise_review_label = '{constants.NOISE_REVIEW_LABEL_OK}' THEN 1
                         ELSE 0
@@ -545,27 +566,17 @@ def main(config: dict | None = None) -> None:
                 "已按唯一反查规则尝试补齐%d条人工纠正样本的operator与submodel/bandai。",
                 int(corrected_mask.sum()),
             )
-        #如果配置了exclude_manual_noise，则在应用人工纠正标签后再过滤一次，去掉LR判定noise的数据。
+        # 应用人工结论后，再按数据库中的LR预测结果过滤未复核样本。
         if not export_all_crops and crops_storage_config["exclude_predicted_noise"]:
-            predictions = load_noise_predictions(config, crops_storage_config)
             before_count = len(metadata)
-            corrected_crop_ids = set(metadata.loc[corrected_mask, "crop_id"].astype(int))
-            metadata = metadata.merge(
-                predictions[["crop_id", "noise_predicted_prob", "noise_predicted_label"]],
-                on="crop_id",
-                how="left",
+            predicted_noise_mask = build_db_predicted_noise_mask(
+                metadata,
+                corrected_mask=corrected_mask,
+                crops_storage_config=crops_storage_config,
             )
-            predicted_noise_labels = set(crops_storage_config["predicted_noise_labels"])
-            predicted_noise_min_prob = float(crops_storage_config["predicted_noise_min_prob"])
-            predicted_noise_mask = (
-                metadata["noise_predicted_label"].isin(predicted_noise_labels)
-                & (metadata["noise_predicted_prob"].fillna(0.0) >= predicted_noise_min_prob)
-                & ~metadata["crop_id"].astype(int).isin(corrected_crop_ids)
-            )
-            #去掉LR过滤
             metadata = metadata.loc[~predicted_noise_mask].reset_index(drop=True)
             logger.info(
-                "按LR预测过滤crop：过滤%d条，保留%d条。",
+                "按数据库LR预测过滤crop（人工ok/纠正优先）：过滤%d条，保留%d条。",
                 before_count - len(metadata),
                 len(metadata),
             )
