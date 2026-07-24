@@ -37,6 +37,8 @@ LABEL_REVIEW_CONFIG = {
     "crop_status": "all",
     "loss_round": "latest",
     "sample_mode": "lr_auto_filtered",
+    "lr_min_pred_label_rate": 0.95,
+    "lr_only_prediction_mismatch": True,
     "samples_per_label": 3,
     "sample_size": 120,
     "random_seed": 42,
@@ -323,6 +325,8 @@ def sample_rows(
     rows: pd.DataFrame,
     stats: pd.DataFrame,
     sample_mode: str,
+    lr_min_pred_label_rate: float,
+    lr_only_prediction_mismatch: bool,
     samples_per_label: int,
     sample_size: int,
     seed: int,
@@ -364,28 +368,43 @@ def sample_rows(
         required_cols = {"noise_predicted_label", "noise_predicted_prob"}
         if not required_cols.issubset(rows.columns):
             raise gr.Error("当前数据没有 LR 预测列。请先运行 stage 13，或确认当前 loss round 有 lr_predictions.csv。")
+        lr_min_pred_label_rate = min(1.0, max(0.0, float(lr_min_pred_label_rate)))
+        if "pred_label_rate" not in rows.columns:
+            raise gr.Error("当前 loss feature 没有 pred_label_rate，无法按线性头预测稳定率筛选。")
+        if lr_only_prediction_mismatch and "pred_label" not in rows.columns:
+            raise gr.Error("当前 loss feature 没有 pred_label，无法筛选 label 与线性头预测不一致的样本。")
+
         predicted_labels = set(CONFIG["crops_storage"]["predicted_noise_labels"])
         min_prob = float(CONFIG["crops_storage"]["predicted_noise_min_prob"])
         review_label = rows.get("noise_review_label", pd.Series("", index=rows.index)).fillna("").astype(str).str.strip()
         corrected = rows.get("manual_corrected_label", pd.Series("", index=rows.index)).fillna("").astype(str).str.strip()
-        work = rows[
+        pred_label_rate = pd.to_numeric(rows["pred_label_rate"], errors="coerce").fillna(0.0)
+        candidate_mask = (
             review_label.eq("")
             & corrected.eq("")
             & rows["noise_predicted_label"].isin(predicted_labels)
             & (rows["noise_predicted_prob"].fillna(0.0) >= min_prob)
-        ].copy()
+            & pred_label_rate.ge(lr_min_pred_label_rate)
+        )
+        if lr_only_prediction_mismatch:
+            current_label = rows["label"].fillna("").astype(str).str.strip()
+            pred_label = rows["pred_label"].fillna("").astype(str).str.strip()
+            candidate_mask &= pred_label.ne("") & pred_label.ne(current_label)
+
+        work = rows[candidate_mask].copy()
         if work.empty:
             return work
-        if "pred_label" in work.columns:
-            work["has_pred_label"] = work["pred_label"].notna() & work["pred_label"].astype(str).str.strip().ne("")
-            return (
-                work.sort_values(["has_pred_label", "noise_predicted_prob"], ascending=[False, False])
-                .drop(columns=["has_pred_label"])
-                .head(sample_size)
-                .reset_index(drop=True)
-            )
+        work["_pred_label_rate_sort"] = pd.to_numeric(work["pred_label_rate"], errors="coerce").fillna(0.0)
+        work["_noise_predicted_prob_sort"] = pd.to_numeric(
+            work["noise_predicted_prob"],
+            errors="coerce",
+        ).fillna(0.0)
         return (
-            work.sort_values("noise_predicted_prob", ascending=False)
+            work.sort_values(
+                ["_pred_label_rate_sort", "_noise_predicted_prob_sort"],
+                ascending=[False, False],
+            )
+            .drop(columns=["_pred_label_rate_sort", "_noise_predicted_prob_sort"])
             .head(sample_size)
             .reset_index(drop=True)
         )
@@ -754,6 +773,17 @@ def build_app() -> gr.Blocks:
                     value=LABEL_REVIEW_CONFIG["sample_mode"],
                     label="抽样方式",
                 )
+                lr_min_pred_label_rate = gr.Slider(
+                    0.0,
+                    1.0,
+                    value=LABEL_REVIEW_CONFIG["lr_min_pred_label_rate"],
+                    step=0.01,
+                    label="LR 候选最低 pred_label_rate",
+                )
+                lr_only_prediction_mismatch = gr.Checkbox(
+                    value=LABEL_REVIEW_CONFIG["lr_only_prediction_mismatch"],
+                    label="LR 候选只看 label != 线性头预测",
+                )
                 label_query = gr.Textbox(value="", label="标签 / series / category 包含")
                 skip_reviewed = gr.Checkbox(value=LABEL_REVIEW_CONFIG["skip_reviewed"], label="跳过已复核 crop")
                 only_uncorrected = gr.Checkbox(value=False, label="跳过已有 corrected label 的 crop")
@@ -834,6 +864,8 @@ def build_app() -> gr.Blocks:
             crop_status_value,
             loss_round_value,
             sample_mode_value,
+            lr_min_pred_label_rate_value,
+            lr_only_prediction_mismatch_value,
             label_query_value,
             skip_reviewed_value,
             only_uncorrected_value,
@@ -861,6 +893,8 @@ def build_app() -> gr.Blocks:
                 filtered,
                 full_stats,
                 str(sample_mode_value),
+                float(lr_min_pred_label_rate_value),
+                bool(lr_only_prediction_mismatch_value),
                 int(samples_per_label_value),
                 int(sample_size_value),
                 int(seed_value),
@@ -956,6 +990,8 @@ def build_app() -> gr.Blocks:
                 crop_status,
                 loss_round,
                 sample_mode,
+                lr_min_pred_label_rate,
+                lr_only_prediction_mismatch,
                 label_query,
                 skip_reviewed,
                 only_uncorrected,
