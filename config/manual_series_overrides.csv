@@ -25,7 +25,9 @@ DD19形,国鉄DD17形ディーゼル機関車#DD19形,set,,,,,,JR East DD19,JR E
 キヤ291形,JR北海道キヤ291形気動車,exclude,,,,,,,,,,excluded by manual review
 DBR600形,JR北海道DBR600形ディーゼル機関車,set,,,,['JR北海道'],['JR Hokkaido'],HTR600,HTR600,{'JR Hokkaido': 'HTR600'},False,manual Commons root
 キハ183系,JR九州キハ183系気動車,set,,,,"['JR北海道', 'JR九州']","['JR Hokkaido', 'JR Kyushu']",JNR Kiha 183 series,JNR Kiha 183 series,"{'JR Hokkaido': 'JNR Kiha 183 series', 'JR Kyushu': 'JNR Kiha 183 series'}",False,temporary shared root before operator-specific split
+キクハ32形,国鉄キハ32形気動車#キクハ32形,set,,,,['JR四国'],['JR Shikoku'],JR Shikoku Kikuha 32,JR Shikoku Kikuha 32,{'JR Shikoku': 'JR Shikoku Kikuha 32'},False,avoid numeric fallback to unrelated JNR 32 passenger-car category
 キハ56系,国鉄キハ56系気動車,exclude,,,,,,,,,,covered by キハ58系
+キハ22形,国鉄キハ20系気動車,exclude,,,,,,,,,,covered by キハ20系
 キハ400系,国鉄キハ40系気動車 (2代),exclude,,,,,,,,,,covered by キハ40系
 7200系,国鉄121系電車#JR四国7200系電車,set,,,,['JR四国'],['JR Shikoku'],JR Shikoku 7200,JR Shikoku 7200,{'JR Shikoku': 'JR Shikoku 7200'},False,manual Commons root
 9000系,JR東海キヤ97形気動車#JR四国9000系気動車,exclude,,,,,,,,,,covered by キヤ97系
