@@ -268,6 +268,7 @@ python tools/normalize_image_paths.py --apply
 - `fine_grain_series.rules_path` 控制细粒度车型标签规则 CSV，默认是 `config/manual_fine_grained_series.csv`。
 - `gdino.model_name`、`box_threshold`、`nms_iou_threshold` 控制主体检测。
 - `noise_detection.exclude_manual_noise` / `exclude_predicted_noise` 控制下一轮 loss tracking 是否排除人工噪声与上一轮 LR 预测噪声；`manual_corrected_label` 会覆盖原标签并保留为训练样本。
+- 最终 crop 导出在 `crops_storage.selection_mode=filtered` 时直接使用数据库中的 LR 预测字段；启用预测噪声过滤时要求 `lr_prediction.sync_to_db: true`，且人工 `ok` / 人工纠正优先于模型预测。`selection_mode=all` 不执行该过滤。
 - `noise_detection` 用于后续 DINO 特征缓存与 small-loss trick 噪声检测实验；特征缓存只绑定 crop 图像和 `crop_id`，训练标签 id 在 loss tracking 轮次中动态生成。
 - `label_metadata_translation.review_file_path` 控制新 label 翻译队列 CSV 路径。
 - `crops_storage.metadata_columns` 控制最终 `metadata.csv` 输出列，默认包含 `manual_reviewed`；`l10n_metadata_file_name` 控制多语言 metadata 文件名。
