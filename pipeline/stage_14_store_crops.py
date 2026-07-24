@@ -19,6 +19,19 @@ from lr_model import register_legacy_main_alias
 
 logger = utils.get_logger("stage_14_store_crops")
 
+CROP_SELECTION_MODES = {"filtered", "all"}
+
+
+def resolve_crop_selection_mode(crops_storage_config: dict) -> str:
+    """Validate and normalize the configured dataset crop selection mode."""
+    selection_mode = str(crops_storage_config["selection_mode"]).strip().lower()
+    if selection_mode not in CROP_SELECTION_MODES:
+        raise ValueError(
+            "crops_storage.selection_mode 必须是以下值之一: "
+            f"{sorted(CROP_SELECTION_MODES)}"
+        )
+    return selection_mode
+
 
 
 
@@ -339,6 +352,8 @@ def write_dataset_manifest(
     labels: pd.DataFrame,
     crops_storage_config: dict,
 ) -> None:
+    selection_mode = resolve_crop_selection_mode(crops_storage_config)
+    filters_enabled = selection_mode == "filtered"
     manifest = {
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
         "metadata_file": crops_storage_config["metadata_file_name"],
@@ -349,6 +364,7 @@ def write_dataset_manifest(
         "label_column": crops_storage_config["label_column"],
         "image_extension": crops_storage_config["image_extension"],
         "crop_pad_frac": crops_storage_config["crop_pad_frac"],
+        "selection_mode": selection_mode,
         "manual_reviewed_count": int(metadata["manual_reviewed"].sum()),
         "manual_corrected_count": int(
             metadata["manual_corrected_label"].notna().sum()
@@ -356,9 +372,16 @@ def write_dataset_manifest(
             else 0
         ),
         "noise_filtering": {
-            "exclude_manual_noise": crops_storage_config["exclude_manual_noise"],
+            "save_only_manual_reviewed": (
+                filters_enabled and crops_storage_config["save_only_manual_reviewed"]
+            ),
+            "exclude_manual_noise": (
+                filters_enabled and crops_storage_config["exclude_manual_noise"]
+            ),
             "manual_noise_labels": crops_storage_config["manual_noise_labels"],
-            "exclude_predicted_noise": crops_storage_config["exclude_predicted_noise"],
+            "exclude_predicted_noise": (
+                filters_enabled and crops_storage_config["exclude_predicted_noise"]
+            ),
             "noise_prediction_round": crops_storage_config["noise_prediction_round"],
             "noise_prediction_file_name": crops_storage_config["noise_prediction_file_name"],
             "predicted_noise_labels": crops_storage_config["predicted_noise_labels"],
@@ -405,6 +428,8 @@ def main(config: dict | None = None) -> None:
     utils.init_db(config=config)
     db_path = utils.join_data_root(config["path"]["db_path"], config=config)
     crops_storage_config = config["crops_storage"]
+    selection_mode = resolve_crop_selection_mode(crops_storage_config)
+    export_all_crops = selection_mode == "all"
     
     if crops_storage_config["reprocess"]:
         logger.info("crops_storage配置为reprocess=true，将重新裁剪所有入选crop图像")
@@ -442,7 +467,12 @@ def main(config: dict | None = None) -> None:
             metadata = pd.read_sql_query(crop_sql, conn)
         logger.info("已加载%d条crop及图片元数据，开始应用筛选策略。", len(metadata))
 
-        if crops_storage_config["save_only_manual_reviewed"]:
+        if export_all_crops:
+            logger.info(
+                "crops_storage.selection_mode=all：不按人工复核或LR预测排除任何crop；"
+                "人工纠正标签仍会应用。"
+            )
+        elif crops_storage_config["save_only_manual_reviewed"]:
             logger.info("将仅保存人工审核为ok的crop。")
             metadata = metadata[
                 metadata["noise_review_label"].eq(constants.NOISE_REVIEW_LABEL_OK)
@@ -455,7 +485,7 @@ def main(config: dict | None = None) -> None:
             & (metadata["manual_corrected_label"].astype(str).str.strip() != "")
         )
         
-        if crops_storage_config["exclude_manual_noise"]:
+        if not export_all_crops and crops_storage_config["exclude_manual_noise"]:
             before_count = len(metadata)
             review_label = metadata["noise_review_label"].fillna("").astype(str).str.strip()
             #为选定噪声label的数据
@@ -516,7 +546,7 @@ def main(config: dict | None = None) -> None:
                 int(corrected_mask.sum()),
             )
         #如果配置了exclude_manual_noise，则在应用人工纠正标签后再过滤一次，去掉LR判定noise的数据。
-        if crops_storage_config["exclude_predicted_noise"]:
+        if not export_all_crops and crops_storage_config["exclude_predicted_noise"]:
             predictions = load_noise_predictions(config, crops_storage_config)
             before_count = len(metadata)
             corrected_crop_ids = set(metadata.loc[corrected_mask, "crop_id"].astype(int))
