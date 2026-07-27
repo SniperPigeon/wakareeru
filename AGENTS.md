@@ -122,6 +122,25 @@ python tools/label_review_gradio.py
 python -m trainer.train
 ```
 
+启动旧 LR 噪声恢复复核 UI。工具使用最新 loss round 的线性头对历史排除
+crop 做标签一致性探测，仅用于分桶和排序；人工结论仍写入现有
+`noise_review_*` / `manual_corrected_label` 字段，不覆盖 LR 预测：
+
+```bash
+python tools/old_noise_recovery_review_gradio.py
+```
+
+这是导出前按需运行的人工辅助工具，不注册为自动 pipeline stage。Stage 14
+启动时会输出 probe CSV 的候选、已复核和未复核数量；缺少 probe 时只告警而
+不中断，并把该状态写入 dataset `manifest.json`。
+
+新生成的 loss round 会包含 `linear_head_artifact.json`，用于绑定线性头、
+特征缓存和 `label_map.json`。loss round、checkpoint、历史 LR 阈值和探针
+置信阈值以 GUI 选择为主；CLI 同名参数只提供启动默认值。旧 round 缺少
+artifact 时可直接在 GUI 的 checkpoint 下拉框选择对应线性头。Label rescue
+区域按当前 `dataset/metadata.csv` 的 label 样本数排序，并显示各 label 可复核的
+疑似错杀与不确定候选。
+
 导出新 label 翻译队列，或在填写完成后将翻译表回写 `label_metadata`：
 
 ```bash
@@ -228,6 +247,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 - `gdino.*` 控制 Grounding-DINO 检测阈值、NMS 与批大小。
 - `noise_detection.*` 控制后续 DINO 特征缓存和 small-loss 噪声检测实验；`image_size` 控制特征提取阶段输入 processor 的正方形 resize/crop 分辨率，修改后需要重跑 `feature_extraction`；`feature_cache_shard_size` 控制特征提取阶段 `.pt` 分片保存后再聚合为单文件缓存。训练标签 id 在 `loss_tracking` 每轮根据当前数据库标签动态生成，并保存到该轮 loss analysis 目录的 `label_map.json`。`loss_tracking` 会按 `noise_detection.exclude_manual_noise` / `exclude_predicted_noise` 过滤人工噪声与上一轮 LR 预测噪声；`manual_corrected_label` 会覆盖原标签并保留为训练样本。详细设计见 `docs/noise_review_loop.md`。
 - `logistic_regression_filter.*` 控制人工复核标签上的 Logistic Regression 噪声筛选实验。
+- `old_noise_recovery.*` 控制旧 LR 噪声恢复复核：从指定 loss round 读取线性头 artifact，用完整 DINO 特征缓存探测由其他历史 LR 模型留下的高置信噪声，生成 review CSV。探测结果不自动改变筛选状态；专用 Gradio UI 写入的人工 `ok`、噪声结论或纠正标签才会影响后续训练和导出。
 - `label_metadata_translation.review_file_path` 控制新 label 翻译队列 CSV 路径。该阶段从 crop 的当前有效 label 扫描缺项，稳定的 `wiki_title` 仅用于辅助翻译。operator 直接按有效 label 聚合 Stage 06 的 `images.operator_en` / `images.operator_jp`；英文名已在 `label_metadata` 术语表中时，只接受与规范日文名匹配的识别结果并复用规范中文名；同一英文名存在多个未知日文写法时选择该 label 内出现次数最多者，未知中文名保留空字符串供人工填写。完整行使用 `INSERT ... ON CONFLICT DO NOTHING` 回写，已有规范记录不可被自动覆盖。
 - `crops_storage.metadata_columns` 控制最终 `metadata.csv` 输出列；默认包含 `manual_reviewed`，用于筛选人工复核为 `ok` 的评估样本。`l10n_metadata_file_name` 控制多语言 metadata JSON 文件名；内容只从数据库 `label_metadata` 表读取并按当前 `labels.csv` 的 id 导出，不再从既有 JSON 或 `images` 旧字段回填。当前 label 缺少规范记录、翻译为空、operator 三语数组不对齐，或检测到链接/双语言污染时直接报错。`manual_correction_invalidate_metadata_columns` 控制人工纠正标签后需要清空的原图分类路径派生 metadata；随后 `manual_correction_refill_operator_columns` 中的 operator 字段只有同 label 唯一非空值时补齐，`manual_correction_refill_submodel_bandai_columns` 作为一对只有唯一非空组合时才一起补齐。
 - `store_crops` 在 `crops_storage.selection_mode=filtered` 时直接读取数据库 `crops.noise_predicted_label` / `noise_predicted_prob` 过滤预测噪声，并只采用 `crops_storage.noise_prediction_model` 指定模型写入的结果；`latest` 通过 `logistic_regression_filter.model_pointer_path` 解析，也可填写具体模型名。同时启用 `exclude_predicted_noise` 时要求 `lr_prediction.sync_to_db: true`。人工复核为 `ok` 或具有 `manual_corrected_label` 的 crop 始终优先于 LR 预测并保留；没有目标模型预测的新 crop 也会保留。`selection_mode=all` 仍跳过人工与 LR 排除，但会应用人工纠正标签。

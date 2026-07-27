@@ -135,6 +135,7 @@ loss_noise_tracking:
   loss_history_file_name: "demo_loss_history.csv"
   epoch_history_file_name: "demo_epoch_history.csv"
   model_checkpoint_prefix: "DINO_CLS_HEAD"
+  linear_head_artifact_file_name: "linear_head_artifact.json"
 
 loss_analysis:
   loss_feature_file_name: "demo_loss_feature.csv"
@@ -163,6 +164,16 @@ lr_prediction: # 对未知数据应用LR模型
   reprocess: false #跳过已经有LR预测结果的数据
   prediction_file_name: "lr_predictions.csv"
   sync_to_db: true
+
+old_noise_recovery:
+  # 使用对应loss round训练出的线性头，对未参与该轮训练的历史LR噪声进行标签一致性探测。
+  loss_round: "latest"
+  label_map_file_name: "label_map.json"
+  review_file_path: "review/old_noise_recovery.csv"
+  historical_noise_labels: ["wrong_label"]
+  historical_noise_min_prob: 0.8
+  disagreement_min_confidence: 0.8
+  batch_size: 1024
 
 label_metadata_translation:
   # 相对path.data_root；缺失label会导出到此CSV并中断pipeline，填写后重跑本阶段回写数据库。

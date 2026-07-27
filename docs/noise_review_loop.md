@@ -118,6 +118,53 @@ stage_13 lr_prediction
 
 如果预测 CSV 不存在，`stage_10` 会跳过预测噪声过滤；如果 CSV 缺必要列，则直接报错。
 
+## 旧噪声恢复复核
+
+这是 Stage 14 导出前按需执行的人工辅助门，不是自动 pipeline stage。推荐
+把自动噪声轮次、人工恢复复核和最终导出分开运行：
+
+```bash
+python pipeline_entry.py --stages "9-13"
+python tools/old_noise_recovery_review_gradio.py
+python pipeline_entry.py --only label_metadata_translation
+python pipeline_entry.py --only store_crops
+```
+
+如果前序 loss/LR 结果已经存在，可以直接启动 Gradio，复核后只重跑
+`store_crops`。Stage 14 的 preflight 会打印 probe 候选数、已复核数和未复核
+数；缺少 probe 只发出警告，不阻塞导出。相同信息会写入 dataset
+`manifest.json` 的 `old_noise_recovery_review`。
+
+`stage_10_train_loss_tracking.py` 在新 loss round 中写入
+`linear_head_artifact.json`，把本轮线性头 checkpoint、完整 DINO 特征缓存和
+`label_map.json` 绑定在一起。`tools/old_noise_recovery_review_gradio.py` 使用这组
+artifact，对当前 latest LR 模型之外的历史高置信噪声做标签一致性探测。
+
+探针按当前标签概率、top-1 预测与 margin 将候选分成：
+
+- `likely_false_kill`：高置信支持当前标签，优先人工确认是否应恢复。
+- `uncertain`：当前模型置信度不足。
+- `likely_true_noise`：高置信预测为其他标签。
+- `label_not_in_model` / `missing_feature`：无法使用当前模型可靠判断。
+
+探针只生成 `old_noise_recovery.review_file_path` CSV 并为 review 排序，不会覆盖
+`crops.noise_predicted_*`。专用 UI 的人工操作沿用
+`noise_review_label`、`noise_review_note`、`noise_reviewed_at` 和
+`manual_corrected_label`；`ok` 或人工纠正仍优先于自动预测。
+
+UI 的 Probe parameters 区用于选择 loss round、线性头 checkpoint、历史 LR
+概率下限、探针置信阈值和推理 batch size；CLI 参数只预填这些控件。Label
+rescue 区读取当前导出 `metadata.csv`，按 label 样本数从少到多显示历史噪声
+候选、疑似错杀和不确定数量，可选定某个稀缺 label 单独复核。
+
+```bash
+python tools/old_noise_recovery_review_gradio.py
+```
+
+旧 loss round 没有 `linear_head_artifact.json` 时，在 GUI checkpoint 下拉框
+明确选择同轮线性头；工具不会按文件时间自动猜测 artifact。也可以用
+`--checkpoint-path` 为 GUI 提供启动默认值。
+
 最终 `stage_14_store_crops.py` 不读取轮次 CSV；`crops_storage.selection_mode=filtered` 时只使用数据库中的预测字段，并通过 `crops_storage.noise_prediction_model` 限定预测来源模型。该配置为 `latest` 时读取 `logistic_regression_filter.model_pointer_path`，也可填写具体模型名。启用最终导出的预测噪声过滤时，配置必须保持 `lr_prediction.sync_to_db=true`；`selection_mode=all` 不执行该过滤。
 
 ## 修改 Stage 8 Label Space 后的重跑
