@@ -10,6 +10,7 @@ if str(PIPELINE_DIR) not in sys.path:
     sys.path.insert(0, str(PIPELINE_DIR))
 
 from pipeline import stage_13c_crop_duplicate_detection as duplicate_stage  # noqa: E402
+from pipeline import utils  # noqa: E402
 
 
 def _row(
@@ -86,6 +87,7 @@ def test_matching_manual_review_is_preserved_only_for_unchanged_members() -> Non
             "candidate_labels_json": '["E259", "E261"]',
             "review_status": "confirmed",
             "resolved_label": "E259",
+            "exclusion_reason": None,
             "review_note": "checked",
             "reviewed_at": "2026-01-01 00:00:00",
         }
@@ -124,11 +126,18 @@ def test_replace_duplicate_groups_writes_group_payload() -> None:
         / "migrations"
         / "013_add_crop_duplicate_groups.sql"
     )
+    exclusion_migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "config"
+        / "migrations"
+        / "014_add_crop_duplicate_exclusion_reason.sql"
+    )
 
     with sqlite3.connect(":memory:") as conn:
         conn.execute("CREATE TABLE crops (id INTEGER PRIMARY KEY)")
         conn.executemany("INSERT INTO crops(id) VALUES (?)", [(30,), (31,)])
         conn.executescript(migration_path.read_text(encoding="utf-8"))
+        conn.executescript(exclusion_migration_path.read_text(encoding="utf-8"))
         duplicate_stage.replace_duplicate_groups(conn, groups)
         stored = conn.execute(
             """
@@ -138,3 +147,155 @@ def test_replace_duplicate_groups_writes_group_payload() -> None:
         ).fetchone()
 
     assert stored == (2, 2, "E259", "pending")
+
+
+def test_load_crop_rows_ignores_only_manual_bad_and_out_of_scope() -> None:
+    with sqlite3.connect(":memory:") as conn:
+        conn.execute(
+            """
+            CREATE TABLE images (
+                id INTEGER PRIMARY KEY,
+                sha1 TEXT,
+                downloaded_path TEXT,
+                fine_grained_series TEXT,
+                series TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE crops (
+                id INTEGER PRIMARY KEY,
+                image_id INTEGER,
+                detector_model TEXT,
+                nms_iou_threshold REAL,
+                detector_score REAL,
+                box_x1 REAL,
+                box_y1 REAL,
+                box_x2 REAL,
+                box_y2 REAL,
+                noise_review_label TEXT,
+                manual_corrected_label TEXT
+            )
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO images(
+                id, sha1, downloaded_path, fine_grained_series, series
+            ) VALUES (?, 'same-sha1', ?, 'E259', 'E259')
+            """,
+            [(crop_id, f"img/{crop_id}.jpg") for crop_id in range(1, 6)],
+        )
+        conn.executemany(
+            """
+            INSERT INTO crops(
+                id, image_id, detector_model, nms_iou_threshold, detector_score,
+                box_x1, box_y1, box_x2, box_y2, noise_review_label
+            ) VALUES (?, ?, 'gdino', 0.5, 0.9, 0, 0, 100, 100, ?)
+            """,
+            [
+                (1, 1, None),
+                (2, 2, "bad_crop"),
+                (3, 3, "out_of_label_space"),
+                (4, 4, "wrong_label"),
+                (5, 5, "ok"),
+            ],
+        )
+
+        rows = duplicate_stage.load_crop_rows(
+            conn,
+            label_column="fine_grained_series",
+        )
+
+    assert rows["crop_id"].tolist() == [1, 4, 5]
+    groups = duplicate_stage.build_duplicate_groups(rows, iou_threshold=0.99)
+    assert len(groups) == 1
+    assert groups[0]["member_crop_ids"] == [1, 4, 5]
+
+
+def test_all_manually_excluded_rows_leave_no_duplicate_group() -> None:
+    rows = pd.DataFrame(
+        columns=[
+            "crop_id",
+            "source_sha1",
+            "detector_model",
+            "nms_iou_threshold",
+            "effective_label",
+            "box_x1",
+            "box_y1",
+            "box_x2",
+            "box_y2",
+        ]
+    )
+
+    groups = duplicate_stage.build_duplicate_groups(rows, iou_threshold=0.99)
+
+    assert groups == []
+
+
+def test_migration_014_preserves_existing_duplicate_reviews() -> None:
+    migration_013 = (
+        Path(__file__).resolve().parents[1]
+        / "config"
+        / "migrations"
+        / "013_add_crop_duplicate_groups.sql"
+    )
+    migration_014 = (
+        Path(__file__).resolve().parents[1]
+        / "config"
+        / "migrations"
+        / "014_add_crop_duplicate_exclusion_reason.sql"
+    )
+    with sqlite3.connect(":memory:") as conn:
+        conn.execute("CREATE TABLE crops (id INTEGER PRIMARY KEY)")
+        conn.executemany("INSERT INTO crops(id) VALUES (?)", [(1,), (2,)])
+        conn.executescript(migration_013.read_text(encoding="utf-8"))
+        conn.execute(
+            """
+            INSERT INTO crop_duplicate_groups(
+                group_key, source_sha1, detector_model, nms_iou_threshold,
+                representative_crop_id, member_crop_ids_json,
+                candidate_labels_json, member_count, candidate_label_count,
+                box_x1, box_y1, box_x2, box_y2, review_status, resolved_label,
+                review_note
+            ) VALUES (
+                'preserved', 'sha1', 'gdino', 0.5, 1, '[1, 2]',
+                '["A", "B"]', 2, 2, 0, 0, 100, 100,
+                'confirmed', 'B', 'checked'
+            )
+            """
+        )
+
+        conn.executescript(migration_014.read_text(encoding="utf-8"))
+        stored = conn.execute(
+            """
+            SELECT id, group_key, review_status, resolved_label,
+                   exclusion_reason, review_note
+            FROM crop_duplicate_groups
+            """
+        ).fetchone()
+
+    assert stored == (1, "preserved", "confirmed", "B", None, "checked")
+
+
+def test_migration_014_handles_latest_schema_created_at_version_12() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    schema_path = project_root / "config" / "schema.sql"
+    migrations_dir = project_root / "config" / "migrations"
+    with sqlite3.connect(":memory:") as conn:
+        conn.execute("PRAGMA user_version = 12")
+        conn.executescript(schema_path.read_text(encoding="utf-8"))
+
+        utils.apply_migrations(conn, migrations_dir)
+
+        columns = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(crop_duplicate_groups)"
+            ).fetchall()
+        }
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+
+    assert "exclusion_reason" in columns
+    assert version == 14

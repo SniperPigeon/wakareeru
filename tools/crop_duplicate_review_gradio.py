@@ -24,15 +24,24 @@ PROJECT_ROOT = find_project_root()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from pipeline import utils  # noqa: E402
+from pipeline import constants, utils  # noqa: E402
 from pipeline.stage_13c_crop_duplicate_detection import (  # noqa: E402
+    IGNORED_MANUAL_REVIEW_LABELS,
+    REVIEW_STATUS_AUTO_RESOLVED,
     REVIEW_STATUS_CONFIRMED,
     REVIEW_STATUS_EXCLUDED,
+    REVIEW_STATUS_PENDING,
+    choose_representative,
 )
 
 
 CONFIG: dict[str, Any] = {}
 DB_PATH: Path
+REVIEW_SOURCE = "crop_duplicate_review"
+GROUP_EXCLUSION_REASONS = {
+    constants.NOISE_REVIEW_LABEL_BAD_CROP,
+    constants.NOISE_REVIEW_LABEL_OUT_OF_LABEL_SPACE,
+}
 
 
 def placeholder_image(text: str) -> Image.Image:
@@ -221,6 +230,7 @@ def group_markdown(group: dict[str, Any], index: int, total: int) -> str:
             f"- **global top-k**: {global_top_k}",
             f"- **proposal model**: {group.get('proposal_model') or ''}",
             f"- **status**: {group['review_status']}",
+            f"- **exclusion reason**: {group.get('exclusion_reason') or ''}",
         ]
     )
 
@@ -254,17 +264,26 @@ def display_group(records: list[dict[str, Any]], index: int):
             pd.DataFrame(columns=MEMBER_COLUMNS),
             None,
             "",
+            gr.update(choices=[], value=None),
             "0/0",
         )
     index = max(0, min(int(index), total - 1))
     group = records[index]
     selected_label = group.get("resolved_label") or group.get("proposed_label")
+    member_ids = [int(row["crop_id"]) for row in group["members"]]
+    representative_id = int(group["representative_crop_id"])
+    selected_member_id = (
+        representative_id
+        if representative_id in member_ids
+        else (member_ids[0] if member_ids else None)
+    )
     return (
         load_representative_image(group),
         group_markdown(group, index, total),
         member_table(group),
         selected_label,
         group.get("review_note") or "",
+        gr.update(choices=member_ids, value=selected_member_id),
         f"{index + 1}/{total}",
     )
 
@@ -281,33 +300,252 @@ def save_resolution(
     status: str,
     resolved_label: str | None,
     note: str,
+    exclusion_reason: str | None = None,
 ) -> None:
     resolved_label = str(resolved_label or "").strip() or None
+    exclusion_reason = str(exclusion_reason or "").strip() or None
     if status == REVIEW_STATUS_CONFIRMED:
         if resolved_label is None:
             raise gr.Error("确认重复组时必须选择最终 label。")
         if resolved_label not in set(known_label_choices()):
             raise gr.Error(f"最终 label 不在当前标签空间中: {resolved_label}")
+        exclusion_reason = None
     elif status == REVIEW_STATUS_EXCLUDED:
         resolved_label = None
+        if exclusion_reason not in GROUP_EXCLUSION_REASONS:
+            raise gr.Error(
+                "整组排除必须选择 bad_crop 或 out_of_label_space。"
+            )
     else:
         raise ValueError(f"不支持的人工状态: {status}")
 
     with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        group_row = conn.execute(
+            """
+            SELECT member_crop_ids_json
+            FROM crop_duplicate_groups
+            WHERE id = ?
+            """,
+            (int(group_id),),
+        ).fetchone()
+        if group_row is None:
+            raise gr.Error(f"找不到duplicate group id={group_id}")
+        member_ids = [int(value) for value in json.loads(str(group_row[0]))]
         updated = conn.execute(
             """
             UPDATE crop_duplicate_groups
             SET review_status = ?,
                 resolved_label = ?,
+                exclusion_reason = ?,
                 review_note = ?,
                 reviewed_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
-            (status, resolved_label, note or None, int(group_id)),
+            (
+                status,
+                resolved_label,
+                exclusion_reason,
+                note or None,
+                int(group_id),
+            ),
         ).rowcount
         if updated != 1:
             raise gr.Error(f"找不到duplicate group id={group_id}")
+        if status == REVIEW_STATUS_EXCLUDED:
+            mark_crops_excluded(
+                conn,
+                crop_ids=member_ids,
+                exclusion_reason=exclusion_reason,
+                note=note,
+            )
+        conn.commit()
+
+
+def mark_crops_excluded(
+    conn: sqlite3.Connection,
+    *,
+    crop_ids: list[int],
+    exclusion_reason: str,
+    note: str,
+) -> None:
+    if exclusion_reason not in GROUP_EXCLUSION_REASONS:
+        raise ValueError(f"不支持的crop排除原因: {exclusion_reason!r}")
+    if not crop_ids:
+        return
+    placeholders = ",".join("?" for _ in crop_ids)
+    conn.execute(
+        f"""
+        UPDATE crops
+        SET noise_review_label = ?,
+            noise_review_note = ?,
+            noise_reviewed_at = CURRENT_TIMESTAMP,
+            noise_review_score_col = ?,
+            manual_corrected_label = NULL,
+            manual_corrected_at = NULL
+        WHERE id IN ({placeholders})
+        """,
+        (
+            exclusion_reason,
+            note or None,
+            REVIEW_SOURCE,
+            *[int(crop_id) for crop_id in crop_ids],
+        ),
+    )
+
+
+def reconcile_group_after_member_exclusion(
+    conn: sqlite3.Connection,
+    *,
+    group_id: int,
+    label_column: str,
+) -> None:
+    image_columns = {
+        str(row[1]) for row in conn.execute("PRAGMA table_info(images)").fetchall()
+    }
+    if label_column not in image_columns:
+        raise ValueError(f"images表不存在配置的label列: {label_column!r}")
+    group_row = conn.execute(
+        """
+        SELECT member_crop_ids_json
+        FROM crop_duplicate_groups
+        WHERE id = ?
+        """,
+        (int(group_id),),
+    ).fetchone()
+    if group_row is None:
+        raise gr.Error(f"找不到duplicate group id={group_id}")
+    member_ids = [int(value) for value in json.loads(str(group_row[0]))]
+    placeholders = ",".join("?" for _ in member_ids)
+    rows = [
+        dict(row)
+        for row in conn.execute(
+            f"""
+            SELECT
+                c.id AS crop_id,
+                c.detector_score,
+                c.noise_review_label,
+                c.manual_corrected_label,
+                c.box_x1,
+                c.box_y1,
+                c.box_x2,
+                c.box_y2,
+                COALESCE(
+                    NULLIF(TRIM(c.manual_corrected_label), ''),
+                    NULLIF(TRIM(i.{label_column}), ''),
+                    NULLIF(TRIM(i.series), '')
+                ) AS effective_label
+            FROM crops c
+            JOIN images i ON i.id = c.image_id
+            WHERE c.id IN ({placeholders})
+              AND COALESCE(TRIM(c.noise_review_label), '') NOT IN (?, ?)
+            ORDER BY c.id
+            """,
+            (
+                *member_ids,
+                *sorted(IGNORED_MANUAL_REVIEW_LABELS),
+            ),
+        ).fetchall()
+    ]
+    if len(rows) < 2:
+        conn.execute(
+            "DELETE FROM crop_duplicate_groups WHERE id = ?",
+            (int(group_id),),
+        )
+        return
+
+    candidate_labels = sorted(
+        {
+            str(row["effective_label"]).strip()
+            for row in rows
+            if str(row["effective_label"] or "").strip()
+        }
+    )
+    if not candidate_labels:
+        raise ValueError(
+            f"重复crop组没有可用label: crop_ids={[row['crop_id'] for row in rows]}"
+        )
+    representative = choose_representative(rows)
+    anchor = rows[0]
+    auto_resolved = len(candidate_labels) == 1
+    conn.execute(
+        """
+        UPDATE crop_duplicate_groups
+        SET representative_crop_id = ?,
+            member_crop_ids_json = ?,
+            candidate_labels_json = ?,
+            member_count = ?,
+            candidate_label_count = ?,
+            box_x1 = ?,
+            box_y1 = ?,
+            box_x2 = ?,
+            box_y2 = ?,
+            proposed_label = NULL,
+            proposed_candidate_prob = NULL,
+            proposed_candidate_margin = NULL,
+            candidate_scores_json = '[]',
+            review_status = ?,
+            resolved_label = ?,
+            exclusion_reason = NULL,
+            review_note = NULL,
+            reviewed_at = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (
+            int(representative["crop_id"]),
+            json.dumps([int(row["crop_id"]) for row in rows], ensure_ascii=False),
+            json.dumps(candidate_labels, ensure_ascii=False),
+            len(rows),
+            len(candidate_labels),
+            float(anchor["box_x1"]),
+            float(anchor["box_y1"]),
+            float(anchor["box_x2"]),
+            float(anchor["box_y2"]),
+            REVIEW_STATUS_AUTO_RESOLVED if auto_resolved else REVIEW_STATUS_PENDING,
+            candidate_labels[0] if auto_resolved else None,
+            int(group_id),
+        ),
+    )
+
+
+def exclude_member(
+    *,
+    group_id: int,
+    crop_id: int,
+    exclusion_reason: str,
+    note: str,
+) -> None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        group_row = conn.execute(
+            """
+            SELECT member_crop_ids_json
+            FROM crop_duplicate_groups
+            WHERE id = ?
+            """,
+            (int(group_id),),
+        ).fetchone()
+        if group_row is None:
+            raise gr.Error(f"找不到duplicate group id={group_id}")
+        member_ids = {
+            int(value) for value in json.loads(str(group_row["member_crop_ids_json"]))
+        }
+        if int(crop_id) not in member_ids:
+            raise gr.Error(f"crop_id={crop_id} 不属于 duplicate group id={group_id}")
+        mark_crops_excluded(
+            conn,
+            crop_ids=[int(crop_id)],
+            exclusion_reason=exclusion_reason,
+            note=note,
+        )
+        reconcile_group_after_member_exclusion(
+            conn,
+            group_id=int(group_id),
+            label_column=CONFIG["crops_storage"]["label_column"],
+        )
         conn.commit()
 
 
@@ -329,8 +567,6 @@ def save_and_advance(
         status = REVIEW_STATUS_CONFIRMED
     elif action == "selected":
         status = REVIEW_STATUS_CONFIRMED
-    elif action == "exclude":
-        status = REVIEW_STATUS_EXCLUDED
     else:
         raise ValueError(f"未知操作: {action}")
 
@@ -342,9 +578,50 @@ def save_and_advance(
     )
     group["review_status"] = status
     group["resolved_label"] = selected_label if status == REVIEW_STATUS_CONFIRMED else None
+    group["exclusion_reason"] = None
     group["review_note"] = note or None
     next_index = min(index + 1, len(records) - 1)
     return records, next_index, group_summary(), *display_group(records, next_index)
+
+
+def exclude_and_reload(
+    records: list[dict[str, Any]],
+    index: int,
+    status_filter: str,
+    member_crop_id: int | None,
+    note: str,
+    exclusion_reason: str,
+    *,
+    whole_group: bool,
+):
+    if not records:
+        raise gr.Error("请先加载重复组。")
+    index = max(0, min(int(index), len(records) - 1))
+    group = records[index]
+    if whole_group:
+        save_resolution(
+            group_id=int(group["id"]),
+            status=REVIEW_STATUS_EXCLUDED,
+            resolved_label=None,
+            exclusion_reason=exclusion_reason,
+            note=note,
+        )
+    else:
+        if member_crop_id is None:
+            raise gr.Error("请先选择要排除的 member crop。")
+        exclude_member(
+            group_id=int(group["id"]),
+            crop_id=int(member_crop_id),
+            exclusion_reason=exclusion_reason,
+            note=note,
+        )
+
+    refreshed = load_groups(status_filter)
+    next_index = min(index, max(0, len(refreshed) - 1))
+    return refreshed, next_index, group_summary(), *display_group(
+        refreshed,
+        next_index,
+    )
 
 
 def move(records: list[dict[str, Any]], index: int, delta: int):
@@ -390,11 +667,32 @@ def build_app() -> gr.Blocks:
                     label="Resolved label",
                 )
                 note = gr.Textbox(label="Review note", lines=3)
+                member_crop_id = gr.Dropdown(
+                    choices=[],
+                    label="Member crop_id to exclude",
+                )
                 progress = gr.Markdown("0/0")
                 with gr.Row():
                     accept_btn = gr.Button("接受线性头建议并下一条", variant="primary")
                     selected_btn = gr.Button("保存所选标签并下一条")
-                exclude_btn = gr.Button("整组排除并下一条", variant="stop")
+                gr.Markdown(
+                    "下面的排除操作会直接写入 `crops.noise_review_label`；"
+                    "单个成员排除后会立即重算当前重复组。"
+                )
+                with gr.Row():
+                    member_bad_crop_btn = gr.Button("当前 crop → Bad crop")
+                    member_out_of_scope_btn = gr.Button(
+                        "当前 crop → Out of label space"
+                    )
+                with gr.Row():
+                    group_bad_crop_btn = gr.Button(
+                        "整组 → Bad crop",
+                        variant="stop",
+                    )
+                    group_out_of_scope_btn = gr.Button(
+                        "整组 → Out of label space",
+                        variant="stop",
+                    )
                 with gr.Row():
                     previous_btn = gr.Button("Previous")
                     next_btn = gr.Button("Skip / Next")
@@ -411,6 +709,7 @@ def build_app() -> gr.Blocks:
                 members,
                 selected_label,
                 note,
+                member_crop_id,
                 progress,
             ],
         )
@@ -428,6 +727,7 @@ def build_app() -> gr.Blocks:
                 members,
                 selected_label,
                 note,
+                member_crop_id,
                 progress,
             ],
         )
@@ -445,14 +745,29 @@ def build_app() -> gr.Blocks:
                 members,
                 selected_label,
                 note,
+                member_crop_id,
                 progress,
             ],
         )
-        exclude_btn.click(
-            lambda records, index, label, review_note: save_and_advance(
-                records, index, label, review_note, "exclude"
+        member_bad_crop_btn.click(
+            lambda records, index, current_filter, crop_id, review_note: (
+                exclude_and_reload(
+                    records,
+                    index,
+                    current_filter,
+                    crop_id,
+                    review_note,
+                    constants.NOISE_REVIEW_LABEL_BAD_CROP,
+                    whole_group=False,
+                )
             ),
-            inputs=[records_state, index_state, selected_label, note],
+            inputs=[
+                records_state,
+                index_state,
+                status_filter,
+                member_crop_id,
+                note,
+            ],
             outputs=[
                 records_state,
                 index_state,
@@ -462,6 +777,103 @@ def build_app() -> gr.Blocks:
                 members,
                 selected_label,
                 note,
+                member_crop_id,
+                progress,
+            ],
+        )
+        member_out_of_scope_btn.click(
+            lambda records, index, current_filter, crop_id, review_note: (
+                exclude_and_reload(
+                    records,
+                    index,
+                    current_filter,
+                    crop_id,
+                    review_note,
+                    constants.NOISE_REVIEW_LABEL_OUT_OF_LABEL_SPACE,
+                    whole_group=False,
+                )
+            ),
+            inputs=[
+                records_state,
+                index_state,
+                status_filter,
+                member_crop_id,
+                note,
+            ],
+            outputs=[
+                records_state,
+                index_state,
+                summary,
+                image,
+                metadata,
+                members,
+                selected_label,
+                note,
+                member_crop_id,
+                progress,
+            ],
+        )
+        group_bad_crop_btn.click(
+            lambda records, index, current_filter, crop_id, review_note: (
+                exclude_and_reload(
+                    records,
+                    index,
+                    current_filter,
+                    crop_id,
+                    review_note,
+                    constants.NOISE_REVIEW_LABEL_BAD_CROP,
+                    whole_group=True,
+                )
+            ),
+            inputs=[
+                records_state,
+                index_state,
+                status_filter,
+                member_crop_id,
+                note,
+            ],
+            outputs=[
+                records_state,
+                index_state,
+                summary,
+                image,
+                metadata,
+                members,
+                selected_label,
+                note,
+                member_crop_id,
+                progress,
+            ],
+        )
+        group_out_of_scope_btn.click(
+            lambda records, index, current_filter, crop_id, review_note: (
+                exclude_and_reload(
+                    records,
+                    index,
+                    current_filter,
+                    crop_id,
+                    review_note,
+                    constants.NOISE_REVIEW_LABEL_OUT_OF_LABEL_SPACE,
+                    whole_group=True,
+                )
+            ),
+            inputs=[
+                records_state,
+                index_state,
+                status_filter,
+                member_crop_id,
+                note,
+            ],
+            outputs=[
+                records_state,
+                index_state,
+                summary,
+                image,
+                metadata,
+                members,
+                selected_label,
+                note,
+                member_crop_id,
                 progress,
             ],
         )
@@ -475,6 +887,7 @@ def build_app() -> gr.Blocks:
                 members,
                 selected_label,
                 note,
+                member_crop_id,
                 progress,
             ],
         )
@@ -488,6 +901,7 @@ def build_app() -> gr.Blocks:
                 members,
                 selected_label,
                 note,
+                member_crop_id,
                 progress,
             ],
         )
