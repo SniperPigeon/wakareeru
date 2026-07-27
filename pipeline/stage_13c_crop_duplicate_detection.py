@@ -22,6 +22,10 @@ REVIEW_STATUS_AUTO_RESOLVED = "auto_resolved"
 REVIEW_STATUS_CONFIRMED = "confirmed"
 REVIEW_STATUS_EXCLUDED = "excluded"
 MANUAL_REVIEW_STATUSES = {REVIEW_STATUS_CONFIRMED, REVIEW_STATUS_EXCLUDED}
+IGNORED_MANUAL_REVIEW_LABELS = {
+    constants.NOISE_REVIEW_LABEL_BAD_CROP,
+    constants.NOISE_REVIEW_LABEL_OUT_OF_LABEL_SPACE,
+}
 
 
 def bbox_iou(left: dict[str, Any], right: dict[str, Any]) -> float:
@@ -174,6 +178,7 @@ def build_duplicate_groups(
                         else REVIEW_STATUS_PENDING
                     ),
                     "resolved_label": candidate_labels[0] if auto_resolved else None,
+                    "exclusion_reason": None,
                     "review_note": None,
                     "reviewed_at": None,
                 }
@@ -361,9 +366,11 @@ def load_crop_rows(conn: sqlite3.Connection, *, label_column: str) -> pd.DataFra
           AND TRIM(i.sha1) != ''
           AND i.downloaded_path IS NOT NULL
           AND TRIM(i.downloaded_path) != ''
+          AND COALESCE(TRIM(c.noise_review_label), '') NOT IN (?, ?)
         ORDER BY i.sha1, c.detector_model, c.nms_iou_threshold, c.id
         """,
         conn,
+        params=sorted(IGNORED_MANUAL_REVIEW_LABELS),
     )
 
 
@@ -371,7 +378,7 @@ def existing_manual_reviews(conn: sqlite3.Connection) -> dict[str, dict[str, Any
     rows = conn.execute(
         """
         SELECT group_key, member_crop_ids_json, candidate_labels_json,
-               review_status, resolved_label, review_note, reviewed_at
+               review_status, resolved_label, exclusion_reason, review_note, reviewed_at
         FROM crop_duplicate_groups
         WHERE review_status IN ('confirmed', 'excluded')
         """
@@ -382,8 +389,9 @@ def existing_manual_reviews(conn: sqlite3.Connection) -> dict[str, dict[str, Any
             "candidate_labels_json": str(row[2]),
             "review_status": str(row[3]),
             "resolved_label": row[4],
-            "review_note": row[5],
-            "reviewed_at": row[6],
+            "exclusion_reason": row[5],
+            "review_note": row[6],
+            "reviewed_at": row[7],
         }
         for row in rows
     }
@@ -406,6 +414,7 @@ def preserve_matching_manual_reviews(
             continue
         group["review_status"] = existing["review_status"]
         group["resolved_label"] = existing["resolved_label"]
+        group["exclusion_reason"] = existing["exclusion_reason"]
         group["review_note"] = existing["review_note"]
         group["reviewed_at"] = existing["reviewed_at"]
 
@@ -418,9 +427,9 @@ INSERT INTO crop_duplicate_groups (
     global_top1_label, global_top1_prob, global_top_k_json,
     proposed_label, proposed_candidate_prob, proposed_candidate_margin,
     candidate_scores_json, proposal_model, review_status, resolved_label,
-    review_note, reviewed_at, detected_at, updated_at
+    exclusion_reason, review_note, reviewed_at, detected_at, updated_at
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 )
 """
@@ -458,6 +467,7 @@ def replace_duplicate_groups(
                 group.get("proposal_model"),
                 group["review_status"],
                 group.get("resolved_label"),
+                group.get("exclusion_reason"),
                 group.get("review_note"),
                 group.get("reviewed_at"),
             )

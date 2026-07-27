@@ -187,6 +187,13 @@ CREATE TABLE IF NOT EXISTS crop_duplicate_groups (
                                    'pending', 'auto_resolved', 'confirmed', 'excluded'
                                )),
     resolved_label             TEXT,
+    exclusion_reason           TEXT
+                               CHECK (
+                                   exclusion_reason IS NULL
+                                   OR exclusion_reason IN (
+                                       'bad_crop', 'out_of_label_space'
+                                   )
+                               ),
     review_note                TEXT,
     reviewed_at                TEXT,
     detected_at                TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

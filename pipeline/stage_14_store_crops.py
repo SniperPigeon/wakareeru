@@ -58,6 +58,7 @@ def load_crop_duplicate_groups(db_path: Path) -> pd.DataFrame:
                 candidate_label_count,
                 review_status,
                 resolved_label,
+                exclusion_reason,
                 proposal_model,
                 detected_at,
                 reviewed_at
@@ -77,6 +78,7 @@ def summarize_crop_duplicate_review(groups: pd.DataFrame) -> dict:
             "auto_resolved_count": 0,
             "confirmed_count": 0,
             "excluded_count": 0,
+            "excluded_reason_counts": {},
             "review_complete": True,
             "tool_command": "python tools/crop_duplicate_review_gradio.py",
         }
@@ -91,6 +93,13 @@ def summarize_crop_duplicate_review(groups: pd.DataFrame) -> dict:
         "auto_resolved_count": int(statuses.eq("auto_resolved").sum()),
         "confirmed_count": int(statuses.eq("confirmed").sum()),
         "excluded_count": int(statuses.eq("excluded").sum()),
+        "excluded_reason_counts": (
+            groups.loc[statuses.eq("excluded"), "exclusion_reason"]
+            .fillna("unspecified")
+            .astype(str)
+            .value_counts()
+            .to_dict()
+        ),
         "tool_command": "python tools/crop_duplicate_review_gradio.py",
     }
     summary["review_complete"] = summary["pending_count"] == 0
