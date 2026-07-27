@@ -7,9 +7,13 @@
 [![repo size](https://img.shields.io/github/repo-size/SniperPigeon/wakareeru)](https://github.com/SniperPigeon/wakareeru)
 [![top language](https://img.shields.io/github/languages/top/SniperPigeon/wakareeru)](https://github.com/SniperPigeon/wakareeru)
 
+> [!IMPORTANT]
+> **此Repo为项目数据集构建与筛选主仓库，关于客户端及其功能反馈请前往App仓库[`wakareeru-app`](https://github.com/wakareeru-team/wakareeru-app) 仓库。**
+
+
 Wakareeru 是一个面向日本铁路车辆的图像识别项目。用户只需上传或拍摄一张图片，即可获得画面中车辆可能所属的系列或细分车型。我们希望它不只是铁路爱好者的识别工具，也能成为更多人了解身边日本铁路车辆的入口。
 
-本仓库是项目的数据与模型核心，负责从日文 Wikipedia 和 Wikimedia Commons 构建细粒度图像数据集，完成图片清洗、车辆主体检测、标签噪声复核、模型训练，并导出供推理服务使用的自包含模型 artifact。Serverless API 位于独立的 [`wakareeru-inference`](https://github.com/SniperPigeon/wakareeru-inference) 仓库。
+本仓库是项目的数据与模型核心，负责从日文 Wikipedia 和 Wikimedia Commons 构建细粒度图像数据集，完成图片清洗、车辆主体检测、标签噪声复核、模型训练，并导出供推理服务使用的自包含模型 artifact。此仓库不负责模型推理服务和终端App.
 
 > [!IMPORTANT]
 > Wakareeru 目前处于 Alpha 阶段。数据集、标签和模型会持续更新，同一张图片在不同版本中可能得到不同结果。识别结果仅供参考，不应用于车辆运营、资产管理或安全相关判断。
