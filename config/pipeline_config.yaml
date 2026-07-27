@@ -179,6 +179,14 @@ label_metadata_translation:
   # 相对path.data_root；缺失label会导出到此CSV并中断pipeline，填写后重跑本阶段回写数据库。
   review_file_path: "review/label_metadata_translation.csv"
 
+crop_duplicate_detection:
+  bbox_iou_threshold: 0.99
+  prediction_model_dir: "model/wakareeru-0.4.0-alpha.1"
+  prediction_device: "auto"
+  prediction_batch_size: 32
+  prediction_top_k: 5
+  require_review_complete_before_store: true
+
 crops_storage:
   format: 'flatten' #存储格式，可选'flatten'或'nested'。'flatten'表示将所有crop数据存储在同一层级的表中，'nested'表示按照series或submodel等层级结构存储。
   reprocess: false #为false则跳过已经存储crop的数据

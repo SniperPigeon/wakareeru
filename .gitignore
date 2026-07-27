@@ -232,3 +232,4 @@ data/dataset
 data/loss_analysis
 data/trainer_feature_cache
 data/trainer_runs
+data/*.sqlite
