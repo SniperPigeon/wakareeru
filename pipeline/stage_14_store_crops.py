@@ -342,6 +342,7 @@ def write_dataset_manifest(
     metadata: pd.DataFrame,
     labels: pd.DataFrame,
     crops_storage_config: dict,
+    resolved_noise_prediction_model: str | None,
 ) -> None:
     selection_mode = resolve_crop_selection_mode(crops_storage_config)
     filters_enabled = selection_mode == "filtered"
@@ -374,6 +375,10 @@ def write_dataset_manifest(
                 filters_enabled and crops_storage_config["exclude_predicted_noise"]
             ),
             "prediction_source": "crops.noise_predicted_label/noise_predicted_prob",
+            "configured_prediction_model": crops_storage_config[
+                "noise_prediction_model"
+            ],
+            "resolved_prediction_model": resolved_noise_prediction_model,
             "human_review_overrides_prediction": True,
             "predicted_noise_labels": crops_storage_config["predicted_noise_labels"],
             "predicted_noise_min_prob": crops_storage_config["predicted_noise_min_prob"],
@@ -395,16 +400,41 @@ def write_dataset_manifest(
     )
 
 
+def resolve_noise_prediction_model(
+    config: dict,
+    crops_storage_config: dict,
+) -> str:
+    configured_model = str(crops_storage_config["noise_prediction_model"]).strip()
+    if not configured_model:
+        raise ValueError("crops_storage.noise_prediction_model 不能为空")
+    if configured_model != "latest":
+        return configured_model
+
+    model_dir = utils.join_data_root(config["path"]["model_dir"], config=config)
+    pointer_path = (
+        model_dir
+        / config["logistic_regression_filter"]["model_pointer_path"]
+    )
+    if not pointer_path.is_file():
+        raise FileNotFoundError(f"Latest LR model pointer not found: {pointer_path}")
+    resolved_model = pointer_path.read_text(encoding="utf-8").strip()
+    if not resolved_model:
+        raise ValueError(f"Latest LR model pointer is empty: {pointer_path}")
+    return resolved_model
+
+
 def build_db_predicted_noise_mask(
     metadata: pd.DataFrame,
     *,
     corrected_mask: pd.Series,
     crops_storage_config: dict,
+    active_prediction_model: str,
 ) -> pd.Series:
     required_columns = {
         "noise_review_label",
         "noise_predicted_prob",
         "noise_predicted_label",
+        "noise_prediction_model",
     }
     missing_columns = required_columns - set(metadata.columns)
     if missing_columns:
@@ -422,7 +452,12 @@ def build_db_predicted_noise_mask(
         | corrected_mask.astype(bool)
     )
     return (
-        metadata["noise_predicted_label"].isin(
+        metadata["noise_prediction_model"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .eq(active_prediction_model)
+        & metadata["noise_predicted_label"].isin(
             set(crops_storage_config["predicted_noise_labels"])
         )
         & (
@@ -442,6 +477,7 @@ def main(config: dict | None = None) -> None:
     crops_storage_config = config["crops_storage"]
     selection_mode = resolve_crop_selection_mode(crops_storage_config)
     export_all_crops = selection_mode == "all"
+    resolved_noise_prediction_model = None
     if (
         not export_all_crops
         and crops_storage_config["exclude_predicted_noise"]
@@ -450,6 +486,15 @@ def main(config: dict | None = None) -> None:
         raise ValueError(
             "store_crops使用crops表中的LR预测字段过滤，"
             "要求lr_prediction.sync_to_db=true"
+        )
+    if not export_all_crops and crops_storage_config["exclude_predicted_noise"]:
+        resolved_noise_prediction_model = resolve_noise_prediction_model(
+            config,
+            crops_storage_config,
+        )
+        logger.info(
+            "仅使用LR模型%s写入数据库的预测结果。",
+            resolved_noise_prediction_model,
         )
 
     if crops_storage_config["reprocess"]:
@@ -573,6 +618,7 @@ def main(config: dict | None = None) -> None:
                 metadata,
                 corrected_mask=corrected_mask,
                 crops_storage_config=crops_storage_config,
+                active_prediction_model=resolved_noise_prediction_model,
             )
             metadata = metadata.loc[~predicted_noise_mask].reset_index(drop=True)
             logger.info(
@@ -673,6 +719,7 @@ def main(config: dict | None = None) -> None:
             metadata=metadata,
             labels=labels,
             crops_storage_config=crops_storage_config,
+            resolved_noise_prediction_model=resolved_noise_prediction_model,
         )
 
         logger.info("crop图像保存完成，已成功保存%d条crop数据。", len(metadata))
