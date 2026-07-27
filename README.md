@@ -306,12 +306,16 @@ python -m trainer.train
 当前默认方案使用 DINOv3 ViT-S/16，拼接 CLS token 与排除 register tokens 后的 patch mean，并训练冻结 backbone 上的线性分类头。训练器支持：
 
 - 固定随机种子的 train/validation 切分；
-- 线性头 feature cache 与 metadata label id 刷新；
+- 按 `image_path` 增量复用的线性头 feature cache；数据集缩小、重新切分或
+  label id 变化不会重提特征，新增图片只补提取缺失项；
 - AMP、top-k accuracy、macro/weighted F1；
 - early stopping、逐 epoch 报告和验证集预测；
 - 每个 phase 的 best checkpoint、`run_summary.json` 与 latest-run 指针。
 
-`trainer.image_size`、backbone、pooling 或特征维度变化后，应重建 trainer feature cache。
+缓存会保留当前 `metadata.csv` 已移除样本的特征，以便之后重新纳入时继续复用。
+`trainer.image_size`、backbone、pooling 或特征维度变化后，应设置
+`feature_cache_rebuild: true` 完整重建一次；正常训练保持为 `false`。缓存以路径
+作为图片身份，若原路径的图片内容被覆盖，也需要显式重建。
 
 导出供推理仓库使用的模型：
 
