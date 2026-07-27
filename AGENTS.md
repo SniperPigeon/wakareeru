@@ -116,6 +116,15 @@ python tools/loss_round_spotcheck_gradio.py
 python tools/label_review_gradio.py
 ```
 
+运行重复 crop 探测后，启动跨标签重复组复核 UI。探测按 Commons SHA1
+与 bbox IoU 聚合同一物理 crop，同标签重复自动解析，跨标签组由已有线性头
+给出候选内建议；人工确认前 Stage 14 默认中断：
+
+```bash
+python pipeline_entry.py --only crop_duplicate_detection
+python tools/crop_duplicate_review_gradio.py
+```
+
 启动 crop 图像线性头训练：
 
 ```bash
@@ -200,6 +209,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 | `logistic_regression_filter` | `stage_12_logistic_regression_filter.py` | 基于人工复核标签训练 Logistic Regression 噪声筛选器 |
 | `lr_prediction` | `stage_13_lr_prediction.py` | 对未复核样本生成 LR 噪声预测 CSV，并可选同步到数据库 |
 | `label_metadata_translation` | `stage_13b_label_metadata_translation.py` | 在 Stage 13 与 crop 存储之间增量导出新 label 翻译表；按有效 label 聚合 Stage 06 逐图 operator，填写后校验并回写 `label_metadata`，不覆盖既有规范行 |
+| `crop_duplicate_detection` | `stage_13c_crop_duplicate_detection.py` | 在最终导出前按原图 SHA1、detector 配置与 bbox IoU 聚合同一物理 crop；同标签组自动解析，跨标签组写入 `crop_duplicate_groups` 并由已有分类 artifact 提议候选标签 |
 | `store_crops` | `stage_14_store_crops.py` | 将 crop 图像保存为最终数据集，并生成 `metadata.csv` / `labels.csv`，同时从数据库 `label_metadata` 规范表导出 `l10n_metadata.json`；`metadata.manual_reviewed` 表示人工复核为 `ok` 的高确信样本 |
 
 `pipeline/deprecated_stage_08_siglip_crop_filtering.py` 是弃用阶段，不应作为默认流程的一部分。
@@ -223,6 +233,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 - `images`：每个 Commons 文件在某个系列/分类下的 manifest 记录，包含标签来源、分类路径、图片元数据、过滤状态、下载状态、LLM 元数据与 `fine_grained_series`。
 - `image_categories`：文件与分类的多对多归属关系。
 - `crops`：Grounding-DINO bbox、检测置信度、裁切状态、噪声分数、人工噪声复核字段和 crop 级人工纠正标签。
+- `crop_duplicate_groups`：同一原图 SHA1 内高 IoU crop 的重复组、候选标签、线性头建议与人工解析结论。原始 `images` / `crops` 来源行不删除；Stage 14 对已解析组只导出一个与最终标签匹配的代表成员。
 - `label_metadata`：label 的英中翻译、三语 operator 数组与日文 Wikipedia title，是 `l10n_metadata.json` 的唯一规范来源。`images.wiki_title`、`images.operator_en`、`images.operator_jp` 保留为旧的逐图来源字段，供既有 pipeline/review 使用，但不得用于本地化 metadata 导出。
 
 常用状态字段：
@@ -249,6 +260,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 - `logistic_regression_filter.*` 控制人工复核标签上的 Logistic Regression 噪声筛选实验。
 - `old_noise_recovery.*` 控制旧 LR 噪声恢复复核：从指定 loss round 读取线性头 artifact，用完整 DINO 特征缓存探测由其他历史 LR 模型留下的高置信噪声，生成 review CSV。探测结果不自动改变筛选状态；专用 Gradio UI 写入的人工 `ok`、噪声结论或纠正标签才会影响后续训练和导出。
 - `label_metadata_translation.review_file_path` 控制新 label 翻译队列 CSV 路径。该阶段从 crop 的当前有效 label 扫描缺项，稳定的 `wiki_title` 仅用于辅助翻译。operator 直接按有效 label 聚合 Stage 06 的 `images.operator_en` / `images.operator_jp`；英文名已在 `label_metadata` 术语表中时，只接受与规范日文名匹配的识别结果并复用规范中文名；同一英文名存在多个未知日文写法时选择该 label 内出现次数最多者，未知中文名保留空字符串供人工填写。完整行使用 `INSERT ... ON CONFLICT DO NOTHING` 回写，已有规范记录不可被自动覆盖。
+- `crop_duplicate_detection.*` 控制最终导出前的重复 crop 解析。分组只在相同 `images.sha1`、detector model 与 NMS 配置内进行，并用 `bbox_iou_threshold` 容忍重复图片分别推理时的微小 bbox 浮动。`prediction_model_dir` 指向已有自包含分类 artifact；全局 top-k 与候选 label 内重归一化结果只作为人工建议。同标签组自动设为 `auto_resolved`，跨标签组必须在 `tools/crop_duplicate_review_gradio.py` 中确认或整组排除；`require_review_complete_before_store` 为 true 时 Stage 14 遇到 pending 组直接中断。
 - `crops_storage.metadata_columns` 控制最终 `metadata.csv` 输出列；默认包含 `manual_reviewed`，用于筛选人工复核为 `ok` 的评估样本。`l10n_metadata_file_name` 控制多语言 metadata JSON 文件名；内容只从数据库 `label_metadata` 表读取并按当前 `labels.csv` 的 id 导出，不再从既有 JSON 或 `images` 旧字段回填。当前 label 缺少规范记录、翻译为空、operator 三语数组不对齐，或检测到链接/双语言污染时直接报错。`manual_correction_invalidate_metadata_columns` 控制人工纠正标签后需要清空的原图分类路径派生 metadata；随后 `manual_correction_refill_operator_columns` 中的 operator 字段只有同 label 唯一非空值时补齐，`manual_correction_refill_submodel_bandai_columns` 作为一对只有唯一非空组合时才一起补齐。
 - `store_crops` 在 `crops_storage.selection_mode=filtered` 时直接读取数据库 `crops.noise_predicted_label` / `noise_predicted_prob` 过滤预测噪声。`crops_storage.noise_prediction_scope=active_model` 只采用 `noise_prediction_model` 指定模型写入的结果；`latest` 通过 `logistic_regression_filter.model_pointer_path` 解析。`all_stored` 则采用数据库中任意 LR 模型当前留下的预测字段，使未被后续轮次覆盖的历史噪声继续排除；数据库并不保存完整逐轮 prediction history。两种范围下，人工复核为 `ok` 或具有 `manual_corrected_label` 的 crop 始终优先保留。启用预测过滤要求 `lr_prediction.sync_to_db: true`；`selection_mode=all` 跳过人工与 LR 排除，但仍应用人工纠正标签。
 - `trainer.*` 控制 crop 图像训练入口；`trainer.image_size` 控制输入 processor 的正方形 resize/crop 分辨率，并写入 checkpoint。训练结束后 `trainer.latest_run_pointer` 指向最新 run 目录，`run_summary.json` 记录每个 phase 的 best checkpoint；`trainer.export.checkpoint_path` 可用 `"latest_best"` 指向最新 run 的 best checkpoint。导出推理 artifact 时，`model_config.json` 与 `processor/preprocessor_config.json` 会使用 checkpoint 中保存的 `image_size`，而不是当前工作区后来改动的配置。Linear head feature cache 按 `image_path` 保存与 train/validation 切分无关的特征库；数据集缩小、重新切分或 label id 变化时复用已有特征并按当前 metadata 生成 labels，新增路径只补提取，暂时移除的路径仍保留在缓存中。修改 `trainer.image_size`、backbone、pooling 方式、特征维度或原路径下的图片内容后，需设置 phase 的 `feature_cache_rebuild: true` 完整重建一次，正常运行保持为 `false`。分类特征由 CLS 与排除 register tokens 后的 patch mean 拼接而成；当前默认冻结 `backbone_model_name` 并只训练线性分类头，报告和 checkpoint 写入 `trainer.output_dir`。

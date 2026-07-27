@@ -1,5 +1,6 @@
 import sqlite3
 import sys
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -51,6 +52,96 @@ def test_noise_prediction_scope_rejects_unknown_value() -> None:
         stage_14.resolve_noise_prediction_scope(
             {"noise_prediction_scope": "historical"}
         )
+
+
+def test_apply_crop_duplicate_resolutions_prefers_member_with_resolved_label() -> None:
+    metadata = pd.DataFrame(
+        [
+            {"crop_id": 1, "fine_grained_series": "E257", "submodel": "wrong"},
+            {"crop_id": 2, "fine_grained_series": "E259", "submodel": "correct"},
+            {"crop_id": 3, "fine_grained_series": "E261", "submodel": "wrong"},
+            {"crop_id": 4, "fine_grained_series": "other", "submodel": "other"},
+        ]
+    )
+    groups = pd.DataFrame(
+        [
+            {
+                "id": 1,
+                "representative_crop_id": 1,
+                "member_crop_ids_json": json.dumps([1, 2, 3]),
+                "review_status": "confirmed",
+                "resolved_label": "E259",
+            }
+        ]
+    )
+
+    result, changed_mask, summary = stage_14.apply_crop_duplicate_resolutions(
+        metadata,
+        duplicate_groups=groups,
+        label_column="fine_grained_series",
+    )
+
+    assert result["crop_id"].tolist() == [2, 4]
+    assert result.loc[result["crop_id"].eq(2), "fine_grained_series"].item() == "E259"
+    assert not changed_mask.any()
+    assert summary["removed_count"] == 2
+
+
+def test_apply_crop_duplicate_resolutions_overrides_label_when_needed() -> None:
+    metadata = pd.DataFrame(
+        [{"crop_id": 10, "fine_grained_series": "old"}]
+    )
+    groups = pd.DataFrame(
+        [
+            {
+                "id": 2,
+                "representative_crop_id": 10,
+                "member_crop_ids_json": json.dumps([10, 11]),
+                "review_status": "confirmed",
+                "resolved_label": "corrected",
+            }
+        ]
+    )
+
+    result, changed_mask, summary = stage_14.apply_crop_duplicate_resolutions(
+        metadata,
+        duplicate_groups=groups,
+        label_column="fine_grained_series",
+    )
+
+    assert result["fine_grained_series"].tolist() == ["corrected"]
+    assert changed_mask.tolist() == [True]
+    assert summary["label_override_count"] == 1
+
+
+def test_apply_crop_duplicate_resolutions_excludes_whole_group() -> None:
+    metadata = pd.DataFrame(
+        [
+            {"crop_id": 20, "fine_grained_series": "a"},
+            {"crop_id": 21, "fine_grained_series": "b"},
+            {"crop_id": 22, "fine_grained_series": "keep"},
+        ]
+    )
+    groups = pd.DataFrame(
+        [
+            {
+                "id": 3,
+                "representative_crop_id": 20,
+                "member_crop_ids_json": json.dumps([20, 21]),
+                "review_status": "excluded",
+                "resolved_label": None,
+            }
+        ]
+    )
+
+    result, _, summary = stage_14.apply_crop_duplicate_resolutions(
+        metadata,
+        duplicate_groups=groups,
+        label_column="fine_grained_series",
+    )
+
+    assert result["crop_id"].tolist() == [22]
+    assert summary["excluded_count"] == 2
 
 
 def test_db_prediction_filter_respects_human_review_and_correction() -> None:
