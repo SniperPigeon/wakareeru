@@ -62,7 +62,7 @@ Wakareeru 是一个面向日本铁路车辆的图像识别项目。用户只需�
 
 本仓库各部分的边界如下：
 
-- `pipeline/`：稳定的数据管线，15 个可独立运行的逻辑阶段。
+- `pipeline/`：稳定的数据管线，16 个可独立运行的逻辑阶段。
 - `tools/`：人工复核、抽查、review CSV 导入导出与维护工具。
 - `trainer/`：最终 crop 数据集的训练、验证、checkpoint 和模型导出。
 - `model_core/`：训练与推理共用的模型结构、artifact loader、预处理和 crop 分类接口。
@@ -88,8 +88,9 @@ pipeline/
   stage_11_loss_analysis.py
   stage_12_logistic_regression_filter.py
   stage_13_lr_prediction.py
-  stage_13b_label_metadata_translation.py
-  stage_14_store_crops.py
+  stage_14_label_metadata_translation.py
+  stage_15_crop_duplicate_detection.py
+  stage_16_store_crops.py
   constants.py
   utils.py
 config/
@@ -197,11 +198,11 @@ python pipeline_entry.py --config path/to/pipeline_config.yaml --only store_crop
 
 - `loss_analysis.request_manual_review: true` 时，Stage 11 会导出本轮分析并中断，等待人工复核。
 - 人工 review 样本不足或无法满足 clean recall 条件时，Stage 12 会中断。
-- Stage 13b 发现新的 label metadata 时，会导出翻译 CSV 并中断；填写后重跑同一阶段才会写回数据库。
+- Stage 14 发现新的 label metadata 时，会导出翻译 CSV 并中断；填写后重跑同一阶段才会写回数据库。
 
 ### 阶段索引
 
-这里的“编号”是 `--stages` 使用的逻辑顺序；文件名保留历史 stage 编号，因此 Stage 13b 是逻辑编号 14，`store_crops` 是逻辑编号 15。
+这里的“编号”既是 `--stages` 使用的逻辑顺序，也是对应脚本文件名中的 stage 编号。
 
 | 编号 | Key | 脚本 | 主要职责 |
 | ---: | --- | --- | --- |
@@ -218,8 +219,9 @@ python pipeline_entry.py --config path/to/pipeline_config.yaml --only store_crop
 | 11 | `loss_analysis` | `stage_11_loss_analysis.py` | 聚合 loss、错误率和预测一致性等噪声筛查特征 |
 | 12 | `logistic_regression_filter` | `stage_12_logistic_regression_filter.py` | 用人工复核数据训练 Logistic Regression 噪声筛选器 |
 | 13 | `lr_prediction` | `stage_13_lr_prediction.py` | 为未复核 crop 生成 LR 噪声预测，并可同步到数据库 |
-| 14 | `label_metadata_translation` | `stage_13b_label_metadata_translation.py` | 增量补齐 label 翻译、三语运营方和日文 Wikipedia title |
-| 15 | `store_crops` | `stage_14_store_crops.py` | 应用人工/LR 筛选与纠正，生成最终 crop 数据集 |
+| 14 | `label_metadata_translation` | `stage_14_label_metadata_translation.py` | 增量补齐 label 翻译、三语运营方和日文 Wikipedia title |
+| 15 | `crop_duplicate_detection` | `stage_15_crop_duplicate_detection.py` | 探测跨标签重复 crop，生成复核队列和标签建议 |
+| 16 | `store_crops` | `stage_16_store_crops.py` | 应用人工/LR 筛选与纠正，生成最终 crop 数据集 |
 
 `pipeline/deprecated_stage_08_siglip_crop_filtering.py` 是弃用实验，不属于默认流程。
 
@@ -273,7 +275,7 @@ python pipeline_entry.py --only label_metadata_translation
 python pipeline_entry.py --only store_crops
 ```
 
-Stage 13b 只导出数据库中尚不存在的新 label；填写 `label_en`、`label_zh` 与三语 operator JSON 数组后重跑，会校验并事务写入 `label_metadata`。已有规范记录不会被自动覆盖。
+Stage 14 只导出数据库中尚不存在的新 label；填写 `label_en`、`label_zh` 与三语 operator JSON 数组后重跑，会校验并事务写入 `label_metadata`。已有规范记录不会被自动覆盖。
 
 默认数据集目录由 `path.dataset_dir` 控制，包含：
 

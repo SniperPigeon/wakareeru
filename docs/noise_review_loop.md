@@ -1,6 +1,6 @@
 # 噪声复核与迭代训练闭环
 
-本文记录 `stage_10` 到 `stage_14` 之间的设计思想和数据流。它描述的是稳定流程，不记录某次运行的样本数、分数或临时结论。
+本文记录 `stage_10` 到 `stage_16` 之间的设计思想和数据流。它描述的是稳定流程，不记录某次运行的样本数、分数或临时结论。
 
 ## 设计目标
 
@@ -46,7 +46,7 @@ stage_11 loss_analysis
 Gradio 人工复核
   - ok：作为 clean 样本
   - wrong_label：作为错标噪声样本
-  - wrong_label + Correct label：本轮 stage_12 仍是噪声正样本；下一轮 stage_10 和 stage_14 使用 Correct label
+  - wrong_label + Correct label：本轮 stage_12 仍是噪声正样本；下一轮 stage_10 和 stage_16 使用 Correct label
   - bad_crop / out_of_label_space：不参与 LR wrong_label 分类器训练
   - ambiguous：跳过，不参与 LR 训练
 
@@ -73,7 +73,7 @@ stage_13 lr_prediction
 - 对 `stage_12` 来说，它不把样本变成 clean。
   因为本轮 loss feature 是在纠正前的标签体系下产生的，`wrong_label + manual_corrected_label` 仍然是“当前标签下的错标噪声”，应作为 LR 的正样本。
 
-- 对下一轮 `stage_10` 和最终 `stage_14` 来说，它是正确标签。
+- 对下一轮 `stage_10` 和最终 `stage_16` 来说，它是正确标签。
   这些阶段会优先使用 `manual_corrected_label`，没有时才回退到 `submodel`、`fine_grained_series` 或 `series`。
 
 这样设计可以同时满足两个目的：本轮用它训练噪声分类器，下一轮把它作为干净监督样本。
@@ -120,7 +120,7 @@ stage_13 lr_prediction
 
 ## 旧噪声恢复复核
 
-这是 Stage 14 导出前按需执行的人工辅助门，不是自动 pipeline stage。推荐
+这是 Stage 16 导出前按需执行的人工辅助门，不是自动 pipeline stage。推荐
 把自动噪声轮次、人工恢复复核和最终导出分开运行：
 
 ```bash
@@ -131,7 +131,7 @@ python pipeline_entry.py --only store_crops
 ```
 
 如果前序 loss/LR 结果已经存在，可以直接启动 Gradio，复核后只重跑
-`store_crops`。Stage 14 的 preflight 会打印 probe 候选数、已复核数和未复核
+`store_crops`。Stage 16 的 preflight 会打印 probe 候选数、已复核数和未复核
 数；缺少 probe 只发出警告，不阻塞导出。相同信息会写入 dataset
 `manifest.json` 的 `old_noise_recovery_review`。
 
@@ -165,7 +165,7 @@ python tools/old_noise_recovery_review_gradio.py
 明确选择同轮线性头；工具不会按文件时间自动猜测 artifact。也可以用
 `--checkpoint-path` 为 GUI 提供启动默认值。
 
-最终 `stage_14_store_crops.py` 不读取轮次 CSV；`crops_storage.selection_mode=filtered` 时使用数据库预测字段，并由 `crops_storage.noise_prediction_scope` 决定作用范围：
+最终 `stage_16_store_crops.py` 不读取轮次 CSV；`crops_storage.selection_mode=filtered` 时使用数据库预测字段，并由 `crops_storage.noise_prediction_scope` 决定作用范围：
 
 - `active_model`：只采用 `noise_prediction_model` 指定模型写入的结果；该配置为 `latest` 时读取 `logistic_regression_filter.model_pointer_path`，也可填写具体模型名。这对应旧的单轮导出行为。
 - `all_stored`：采用数据库中任意 LR 模型当前留下的预测字段。由于 `crops` 只保存每个 crop 最后一次写入的预测，这表示“所有仍残留的历史预测”，不是完整逐轮 prediction history。
@@ -209,7 +209,7 @@ noise_detection:
 
 ## 最终导出
 
-`stage_14_store_crops.py` 以 `crops_storage.selection_mode=filtered` 导出最终数据集时：
+`stage_16_store_crops.py` 以 `crops_storage.selection_mode=filtered` 导出最终数据集时：
 
 - 先按配置过滤人工噪声，再根据 `noise_prediction_scope` 使用目标模型或所有已存模型的 `crops.noise_predicted_label` / `noise_predicted_prob` 过滤预测噪声。
 - 人工复核为 `ok` 或有 `manual_corrected_label` 的样本不会因为预测噪声而被过滤。

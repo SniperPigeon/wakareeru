@@ -7,7 +7,7 @@ import pandas as pd
 import constants
 import utils
 
-logger = utils.get_logger("stage_13b_label_metadata_translation")
+logger = utils.get_logger("stage_14_label_metadata_translation")
 
 TRANSLATION_COLUMNS = [
     "label_ja",

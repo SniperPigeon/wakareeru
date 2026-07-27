@@ -10,7 +10,7 @@ PIPELINE_DIR = Path(__file__).resolve().parents[1] / "pipeline"
 if str(PIPELINE_DIR) not in sys.path:
     sys.path.insert(0, str(PIPELINE_DIR))
 
-from pipeline import stage_14_store_crops as stage_14  # noqa: E402
+from pipeline import stage_16_store_crops as stage_16  # noqa: E402
 
 
 def _crops_storage_config() -> dict:
@@ -23,24 +23,24 @@ def _crops_storage_config() -> dict:
 
 
 def test_crop_selection_mode_supports_filtered_and_all() -> None:
-    assert stage_14.resolve_crop_selection_mode({"selection_mode": "filtered"}) == "filtered"
-    assert stage_14.resolve_crop_selection_mode({"selection_mode": " ALL "}) == "all"
+    assert stage_16.resolve_crop_selection_mode({"selection_mode": "filtered"}) == "filtered"
+    assert stage_16.resolve_crop_selection_mode({"selection_mode": " ALL "}) == "all"
 
 
 def test_crop_selection_mode_rejects_unknown_value() -> None:
     with pytest.raises(ValueError, match="selection_mode"):
-        stage_14.resolve_crop_selection_mode({"selection_mode": "latest"})
+        stage_16.resolve_crop_selection_mode({"selection_mode": "latest"})
 
 
 def test_noise_prediction_scope_supports_active_and_all_stored() -> None:
     assert (
-        stage_14.resolve_noise_prediction_scope(
+        stage_16.resolve_noise_prediction_scope(
             {"noise_prediction_scope": "active_model"}
         )
         == "active_model"
     )
     assert (
-        stage_14.resolve_noise_prediction_scope(
+        stage_16.resolve_noise_prediction_scope(
             {"noise_prediction_scope": " ALL_STORED "}
         )
         == "all_stored"
@@ -49,7 +49,7 @@ def test_noise_prediction_scope_supports_active_and_all_stored() -> None:
 
 def test_noise_prediction_scope_rejects_unknown_value() -> None:
     with pytest.raises(ValueError, match="noise_prediction_scope"):
-        stage_14.resolve_noise_prediction_scope(
+        stage_16.resolve_noise_prediction_scope(
             {"noise_prediction_scope": "historical"}
         )
 
@@ -75,7 +75,7 @@ def test_apply_crop_duplicate_resolutions_prefers_member_with_resolved_label() -
         ]
     )
 
-    result, changed_mask, summary = stage_14.apply_crop_duplicate_resolutions(
+    result, changed_mask, summary = stage_16.apply_crop_duplicate_resolutions(
         metadata,
         duplicate_groups=groups,
         label_column="fine_grained_series",
@@ -103,7 +103,7 @@ def test_apply_crop_duplicate_resolutions_overrides_label_when_needed() -> None:
         ]
     )
 
-    result, changed_mask, summary = stage_14.apply_crop_duplicate_resolutions(
+    result, changed_mask, summary = stage_16.apply_crop_duplicate_resolutions(
         metadata,
         duplicate_groups=groups,
         label_column="fine_grained_series",
@@ -134,7 +134,7 @@ def test_apply_crop_duplicate_resolutions_excludes_whole_group() -> None:
         ]
     )
 
-    result, _, summary = stage_14.apply_crop_duplicate_resolutions(
+    result, _, summary = stage_16.apply_crop_duplicate_resolutions(
         metadata,
         duplicate_groups=groups,
         label_column="fine_grained_series",
@@ -196,7 +196,7 @@ def test_db_prediction_filter_respects_human_review_and_correction() -> None:
         [False, False, True, False, False, False, False]
     )
 
-    mask = stage_14.build_db_predicted_noise_mask(
+    mask = stage_16.build_db_predicted_noise_mask(
         metadata,
         corrected_mask=corrected_mask,
         crops_storage_config=_crops_storage_config(),
@@ -234,7 +234,7 @@ def test_db_prediction_filter_all_stored_includes_old_models() -> None:
     )
     corrected_mask = pd.Series([False, False, True, False])
 
-    mask = stage_14.build_db_predicted_noise_mask(
+    mask = stage_16.build_db_predicted_noise_mask(
         metadata,
         corrected_mask=corrected_mask,
         crops_storage_config=_crops_storage_config(),
@@ -254,7 +254,7 @@ def test_db_prediction_filter_requires_database_columns() -> None:
     )
 
     with pytest.raises(ValueError, match="noise_predicted_prob"):
-        stage_14.build_db_predicted_noise_mask(
+        stage_16.build_db_predicted_noise_mask(
             metadata,
             corrected_mask=pd.Series([False]),
             crops_storage_config=_crops_storage_config(),
@@ -283,7 +283,7 @@ def test_resolve_noise_prediction_model_from_latest_pointer(
         },
     }
 
-    resolved_model = stage_14.resolve_noise_prediction_model(
+    resolved_model = stage_16.resolve_noise_prediction_model(
         config,
         _crops_storage_config(),
     )
@@ -295,7 +295,7 @@ def test_resolve_noise_prediction_model_accepts_explicit_model() -> None:
     crops_storage_config = _crops_storage_config()
     crops_storage_config["noise_prediction_model"] = "LR_pipeline_fixed.joblib"
 
-    resolved_model = stage_14.resolve_noise_prediction_model(
+    resolved_model = stage_16.resolve_noise_prediction_model(
         {},
         crops_storage_config,
     )
@@ -359,7 +359,7 @@ def test_old_noise_recovery_summary_uses_current_manual_review_state(
         },
     }
 
-    summary = stage_14.summarize_old_noise_recovery_review(
+    summary = stage_16.summarize_old_noise_recovery_review(
         config=config,
         db_path=db_path,
     )

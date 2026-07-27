@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS images (
 
 -- Canonical and sole source for the generated dataset/l10n_metadata.json artifact.
 -- The similarly named fields on images are retained as legacy per-image metadata,
--- but stage_14 must not use them to construct localized label metadata.
+-- but stage_16 must not use them to construct localized label metadata.
 CREATE TABLE IF NOT EXISTS label_metadata (
     label_ja          TEXT PRIMARY KEY,
     label_en          TEXT NOT NULL,
@@ -157,7 +157,7 @@ CREATE INDEX IF NOT EXISTS idx_crops_power_type ON crops(power_type);
 CREATE INDEX IF NOT EXISTS idx_crops_detector   ON crops(detector_model, nms_iou_threshold);
 
 -- One row per physical crop duplicated through multiple manifest image rows.
--- Source images and crop provenance remain untouched; Stage 14 consumes the
+-- Source images and crop provenance remain untouched; Stage 16 consumes the
 -- reviewed resolution and exports at most one member from each group.
 CREATE TABLE IF NOT EXISTS crop_duplicate_groups (
     id                         INTEGER PRIMARY KEY AUTOINCREMENT,

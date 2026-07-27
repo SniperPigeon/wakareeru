@@ -9,7 +9,7 @@ PIPELINE_DIR = Path(__file__).resolve().parents[1] / "pipeline"
 if str(PIPELINE_DIR) not in sys.path:
     sys.path.insert(0, str(PIPELINE_DIR))
 
-from pipeline import stage_13c_crop_duplicate_detection as duplicate_stage  # noqa: E402
+from pipeline import stage_15_crop_duplicate_detection as duplicate_stage  # noqa: E402
 from pipeline import utils  # noqa: E402
 
 

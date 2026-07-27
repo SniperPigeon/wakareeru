@@ -25,7 +25,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipeline import constants, utils  # noqa: E402
-from pipeline.stage_13c_crop_duplicate_detection import (  # noqa: E402
+from pipeline.stage_15_crop_duplicate_detection import (  # noqa: E402
     IGNORED_MANUAL_REVIEW_LABELS,
     REVIEW_STATUS_AUTO_RESOLVED,
     REVIEW_STATUS_CONFIRMED,
@@ -637,7 +637,7 @@ def build_app() -> gr.Blocks:
         gr.Markdown(
             "# Crop Duplicate Review\n\n"
             "同一 SHA1 内高 IoU crop 的线性头建议仅用于排序；"
-            "人工确认后 Stage 14 才会保留一个代表 crop。"
+            "人工确认后 Stage 16 才会保留一个代表 crop。"
         )
         records_state = gr.State([])
         index_state = gr.State(0)

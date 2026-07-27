@@ -15,7 +15,7 @@ from model_core.preprocess import preprocess_crops
 from pipeline import constants, utils
 
 
-logger = utils.get_logger("stage_13c_crop_duplicate_detection")
+logger = utils.get_logger("stage_15_crop_duplicate_detection")
 
 REVIEW_STATUS_PENDING = "pending"
 REVIEW_STATUS_AUTO_RESOLVED = "auto_resolved"
