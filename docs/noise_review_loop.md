@@ -165,7 +165,12 @@ python tools/old_noise_recovery_review_gradio.py
 明确选择同轮线性头；工具不会按文件时间自动猜测 artifact。也可以用
 `--checkpoint-path` 为 GUI 提供启动默认值。
 
-最终 `stage_14_store_crops.py` 不读取轮次 CSV；`crops_storage.selection_mode=filtered` 时只使用数据库中的预测字段，并通过 `crops_storage.noise_prediction_model` 限定预测来源模型。该配置为 `latest` 时读取 `logistic_regression_filter.model_pointer_path`，也可填写具体模型名。启用最终导出的预测噪声过滤时，配置必须保持 `lr_prediction.sync_to_db=true`；`selection_mode=all` 不执行该过滤。
+最终 `stage_14_store_crops.py` 不读取轮次 CSV；`crops_storage.selection_mode=filtered` 时使用数据库预测字段，并由 `crops_storage.noise_prediction_scope` 决定作用范围：
+
+- `active_model`：只采用 `noise_prediction_model` 指定模型写入的结果；该配置为 `latest` 时读取 `logistic_regression_filter.model_pointer_path`，也可填写具体模型名。这对应旧的单轮导出行为。
+- `all_stored`：采用数据库中任意 LR 模型当前留下的预测字段。由于 `crops` 只保存每个 crop 最后一次写入的预测，这表示“所有仍残留的历史预测”，不是完整逐轮 prediction history。
+
+两种范围都会让人工 `ok` 或 `manual_corrected_label` 覆盖 LR 预测并保留样本。启用最终导出的预测噪声过滤时，配置必须保持 `lr_prediction.sync_to_db=true`；`selection_mode=all` 不执行该过滤。
 
 ## 修改 Stage 8 Label Space 后的重跑
 
@@ -206,9 +211,10 @@ noise_detection:
 
 `stage_14_store_crops.py` 以 `crops_storage.selection_mode=filtered` 导出最终数据集时：
 
-- 先按配置过滤人工噪声，再读取目标 `noise_prediction_model` 对应的 `crops.noise_predicted_label` / `noise_predicted_prob` 过滤预测噪声。
+- 先按配置过滤人工噪声，再根据 `noise_prediction_scope` 使用目标模型或所有已存模型的 `crops.noise_predicted_label` / `noise_predicted_prob` 过滤预测噪声。
 - 人工复核为 `ok` 或有 `manual_corrected_label` 的样本不会因为预测噪声而被过滤。
-- 没有目标模型预测的新 crop 默认保留；数据库中其他模型留下的历史预测不会参与本次导出。
+- `active_model` 下，没有目标模型预测的新 crop 默认保留；其他模型的历史预测不参与本次导出。
+- `all_stored` 下，没有任何数据库预测的新 crop 默认保留；任意模型留下的高置信预测都会参与本次导出。
 - 导出标签优先使用 `manual_corrected_label`。
 - 人工纠正样本会按 `crops_storage.manual_correction_invalidate_metadata_columns` 清空原图分类路径派生的细节 metadata，避免旧标签语境下的番台、运营公司、特殊编成或特殊涂装继续污染导出。随后会从未纠正的同 label 导出候选中保守反查补齐：`manual_correction_refill_operator_columns` 中的 operator 字段只有唯一非空值时补齐；`manual_correction_refill_submodel_bandai_columns` 作为一对，只有唯一非空组合时才一起补齐。
 - `metadata.manual_reviewed` 仍只表示人工复核为 `ok` 的高确信样本；人工纠正样本的正确标签通过 `label` 字段体现。

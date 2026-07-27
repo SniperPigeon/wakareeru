@@ -14,6 +14,7 @@ import utils
 logger = utils.get_logger("stage_14_store_crops")
 
 CROP_SELECTION_MODES = {"filtered", "all"}
+NOISE_PREDICTION_SCOPES = {"active_model", "all_stored"}
 
 
 def resolve_crop_selection_mode(crops_storage_config: dict) -> str:
@@ -25,6 +26,16 @@ def resolve_crop_selection_mode(crops_storage_config: dict) -> str:
             f"{sorted(CROP_SELECTION_MODES)}"
         )
     return selection_mode
+
+
+def resolve_noise_prediction_scope(crops_storage_config: dict) -> str:
+    scope = str(crops_storage_config["noise_prediction_scope"]).strip().lower()
+    if scope not in NOISE_PREDICTION_SCOPES:
+        raise ValueError(
+            "crops_storage.noise_prediction_scope 必须是以下值之一: "
+            f"{sorted(NOISE_PREDICTION_SCOPES)}"
+        )
+    return scope
 
 
 def label_to_ascii(label: str, fallback: str = "label") -> str:
@@ -336,6 +347,122 @@ def flush_crop_save_updates(db_path: Path, updates: list[tuple[str, int]]) -> No
         conn.commit()
 
 
+def summarize_old_noise_recovery_review(
+    *,
+    config: dict,
+    db_path: Path,
+) -> dict:
+    review_path = utils.join_data_root(
+        config["old_noise_recovery"]["review_file_path"],
+        config=config,
+    )
+    summary = {
+        "workflow": "manual_auxiliary_tool",
+        "pipeline_stage": False,
+        "tool_command": "python tools/old_noise_recovery_review_gradio.py",
+        "review_file": str(
+            config["old_noise_recovery"]["review_file_path"]
+        ),
+        "resolved_review_file": str(review_path),
+    }
+    if not review_path.is_file():
+        return {
+            **summary,
+            "status": "missing",
+            "candidate_count": 0,
+            "reviewed_count": 0,
+            "unreviewed_count": 0,
+        }
+
+    probe = pd.read_csv(review_path)
+    if "crop_id" not in probe.columns:
+        raise ValueError(f"旧噪声恢复review CSV缺少crop_id列: {review_path}")
+    probe["crop_id"] = probe["crop_id"].astype(int)
+    probe = probe.drop_duplicates("crop_id", keep="last")
+    with sqlite3.connect(db_path) as conn:
+        reviews = pd.read_sql_query(
+            """
+            SELECT
+                id AS crop_id,
+                noise_review_label,
+                manual_corrected_label
+            FROM crops
+            """,
+            conn,
+        )
+    probe = probe.merge(reviews, on="crop_id", how="left")
+    reviewed = (
+        probe["noise_review_label"].fillna("").astype(str).str.strip().ne("")
+        | probe["manual_corrected_label"].fillna("").astype(str).str.strip().ne("")
+    )
+    manual_ok = (
+        probe["noise_review_label"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .eq(constants.NOISE_REVIEW_LABEL_OK)
+    )
+    corrected = (
+        probe["manual_corrected_label"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .ne("")
+    )
+    probe_rounds = (
+        sorted(probe["probe_round"].dropna().astype(str).unique())
+        if "probe_round" in probe.columns
+        else []
+    )
+    active_lr_models = (
+        sorted(probe["active_lr_model"].dropna().astype(str).unique())
+        if "active_lr_model" in probe.columns
+        else []
+    )
+    bucket_counts = (
+        {
+            str(bucket): int(count)
+            for bucket, count in probe["probe_bucket"].value_counts().items()
+        }
+        if "probe_bucket" in probe.columns
+        else {}
+    )
+    return {
+        **summary,
+        "status": "available",
+        "candidate_count": int(len(probe)),
+        "reviewed_count": int(reviewed.sum()),
+        "unreviewed_count": int((~reviewed).sum()),
+        "manual_ok_count": int(manual_ok.sum()),
+        "manual_corrected_count": int(corrected.sum()),
+        "probe_rounds": probe_rounds,
+        "active_lr_models": active_lr_models,
+        "bucket_counts": bucket_counts,
+    }
+
+
+def log_old_noise_recovery_preflight(summary: dict) -> None:
+    if summary["status"] == "missing":
+        logger.warning(
+            "旧噪声恢复review是导出前人工辅助流程，不是pipeline stage；"
+            "当前未找到probe CSV：%s。需要复核时先运行：%s",
+            summary["resolved_review_file"],
+            summary["tool_command"],
+        )
+        return
+    log = logger.warning if summary["unreviewed_count"] else logger.info
+    log(
+        "旧噪声恢复review（非pipeline stage）：候选%d，已复核%d，未复核%d，"
+        "人工ok=%d，人工纠正=%d。工具：%s",
+        summary["candidate_count"],
+        summary["reviewed_count"],
+        summary["unreviewed_count"],
+        summary["manual_ok_count"],
+        summary["manual_corrected_count"],
+        summary["tool_command"],
+    )
+
+
 def write_dataset_manifest(
     *,
     manifest_path: Path,
@@ -343,8 +470,10 @@ def write_dataset_manifest(
     labels: pd.DataFrame,
     crops_storage_config: dict,
     resolved_noise_prediction_model: str | None,
+    old_noise_recovery_review: dict,
 ) -> None:
     selection_mode = resolve_crop_selection_mode(crops_storage_config)
+    prediction_scope = resolve_noise_prediction_scope(crops_storage_config)
     filters_enabled = selection_mode == "filtered"
     manifest = {
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
@@ -375,9 +504,12 @@ def write_dataset_manifest(
                 filters_enabled and crops_storage_config["exclude_predicted_noise"]
             ),
             "prediction_source": "crops.noise_predicted_label/noise_predicted_prob",
-            "configured_prediction_model": crops_storage_config[
-                "noise_prediction_model"
-            ],
+            "prediction_scope": prediction_scope,
+            "configured_prediction_model": (
+                crops_storage_config["noise_prediction_model"]
+                if prediction_scope == "active_model"
+                else None
+            ),
             "resolved_prediction_model": resolved_noise_prediction_model,
             "human_review_overrides_prediction": True,
             "predicted_noise_labels": crops_storage_config["predicted_noise_labels"],
@@ -392,6 +524,7 @@ def write_dataset_manifest(
                 "manual_correction_refill_submodel_bandai_columns"
             ],
         },
+        "old_noise_recovery_review": old_noise_recovery_review,
         "notes": "Generated by stage_14_store_crops.py",
     }
     manifest_path.write_text(
@@ -428,14 +561,24 @@ def build_db_predicted_noise_mask(
     *,
     corrected_mask: pd.Series,
     crops_storage_config: dict,
-    active_prediction_model: str,
+    prediction_scope: str,
+    active_prediction_model: str | None,
 ) -> pd.Series:
+    prediction_scope = str(prediction_scope).strip().lower()
+    if prediction_scope not in NOISE_PREDICTION_SCOPES:
+        raise ValueError(
+            "prediction_scope 必须是以下值之一: "
+            f"{sorted(NOISE_PREDICTION_SCOPES)}"
+        )
     required_columns = {
         "noise_review_label",
         "noise_predicted_prob",
         "noise_predicted_label",
-        "noise_prediction_model",
     }
+    if prediction_scope == "active_model":
+        required_columns.add("noise_prediction_model")
+        if not active_prediction_model:
+            raise ValueError("active_model范围要求提供active_prediction_model")
     missing_columns = required_columns - set(metadata.columns)
     if missing_columns:
         raise ValueError(f"crop数据库预测字段缺失: {sorted(missing_columns)}")
@@ -451,13 +594,8 @@ def build_db_predicted_noise_mask(
         review_label.eq(constants.NOISE_REVIEW_LABEL_OK)
         | corrected_mask.astype(bool)
     )
-    return (
-        metadata["noise_prediction_model"]
-        .fillna("")
-        .astype(str)
-        .str.strip()
-        .eq(active_prediction_model)
-        & metadata["noise_predicted_label"].isin(
+    predicted_noise = (
+        metadata["noise_predicted_label"].isin(
             set(crops_storage_config["predicted_noise_labels"])
         )
         & (
@@ -465,6 +603,16 @@ def build_db_predicted_noise_mask(
             >= float(crops_storage_config["predicted_noise_min_prob"])
         )
         & ~human_override
+    )
+    if prediction_scope == "all_stored":
+        return predicted_noise
+    return (
+        metadata["noise_prediction_model"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .eq(active_prediction_model)
+        & predicted_noise
     )
 
 
@@ -476,8 +624,14 @@ def main(config: dict | None = None) -> None:
     db_path = utils.join_data_root(config["path"]["db_path"], config=config)
     crops_storage_config = config["crops_storage"]
     selection_mode = resolve_crop_selection_mode(crops_storage_config)
+    prediction_scope = resolve_noise_prediction_scope(crops_storage_config)
     export_all_crops = selection_mode == "all"
     resolved_noise_prediction_model = None
+    old_noise_recovery_review = summarize_old_noise_recovery_review(
+        config=config,
+        db_path=db_path,
+    )
+    log_old_noise_recovery_preflight(old_noise_recovery_review)
     if (
         not export_all_crops
         and crops_storage_config["exclude_predicted_noise"]
@@ -487,7 +641,11 @@ def main(config: dict | None = None) -> None:
             "store_crops使用crops表中的LR预测字段过滤，"
             "要求lr_prediction.sync_to_db=true"
         )
-    if not export_all_crops and crops_storage_config["exclude_predicted_noise"]:
+    if (
+        not export_all_crops
+        and crops_storage_config["exclude_predicted_noise"]
+        and prediction_scope == "active_model"
+    ):
         resolved_noise_prediction_model = resolve_noise_prediction_model(
             config,
             crops_storage_config,
@@ -495,6 +653,10 @@ def main(config: dict | None = None) -> None:
         logger.info(
             "仅使用LR模型%s写入数据库的预测结果。",
             resolved_noise_prediction_model,
+        )
+    elif not export_all_crops and crops_storage_config["exclude_predicted_noise"]:
+        logger.info(
+            "使用数据库中所有已存LR模型轮次的预测结果；人工ok/纠正标签优先保留。"
         )
 
     if crops_storage_config["reprocess"]:
@@ -618,11 +780,14 @@ def main(config: dict | None = None) -> None:
                 metadata,
                 corrected_mask=corrected_mask,
                 crops_storage_config=crops_storage_config,
+                prediction_scope=prediction_scope,
                 active_prediction_model=resolved_noise_prediction_model,
             )
             metadata = metadata.loc[~predicted_noise_mask].reset_index(drop=True)
             logger.info(
-                "按数据库LR预测过滤crop（人工ok/纠正优先）：过滤%d条，保留%d条。",
+                "按数据库LR预测过滤crop（scope=%s，人工ok/纠正优先）："
+                "过滤%d条，保留%d条。",
+                prediction_scope,
                 before_count - len(metadata),
                 len(metadata),
             )
@@ -720,6 +885,7 @@ def main(config: dict | None = None) -> None:
             labels=labels,
             crops_storage_config=crops_storage_config,
             resolved_noise_prediction_model=resolved_noise_prediction_model,
+            old_noise_recovery_review=old_noise_recovery_review,
         )
 
         logger.info("crop图像保存完成，已成功保存%d条crop数据。", len(metadata))
