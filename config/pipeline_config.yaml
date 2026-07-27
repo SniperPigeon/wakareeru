@@ -181,11 +181,11 @@ label_metadata_translation:
 
 crop_duplicate_detection:
   bbox_iou_threshold: 0.99
-  prediction_model_dir: "model/wakareeru-0.4.0-alpha.1"
+  prediction_model_dir: "model/wakareeru-0.4.1-alpha.1"
   prediction_device: "auto"
   prediction_batch_size: 32
   prediction_top_k: 5
-  require_review_complete_before_store: true
+  require_review_complete_before_store: false
 
 crops_storage:
   format: 'flatten' #存储格式，可选'flatten'或'nested'。'flatten'表示将所有crop数据存储在同一层级的表中，'nested'表示按照series或submodel等层级结构存储。
@@ -197,7 +197,7 @@ crops_storage:
   exclude_predicted_noise: true
   # "active_model"只排除noise_prediction_model指定/latest模型的预测；
   # "all_stored"排除数据库中任意LR模型留下的预测，人工ok或manual_corrected_label始终保留。
-  noise_prediction_scope: "active_model"
+  noise_prediction_scope: "all_stored"
   # "latest"读取logistic_regression_filter.model_pointer_path；也可填写数据库noise_prediction_model中的具体模型名。
   # 仅在noise_prediction_scope="active_model"时使用。
   noise_prediction_model: "latest"
@@ -264,7 +264,7 @@ trainer:
     # "latest_best" / "latest" = trainer.latest_run_pointer指向的最新run中最后一个phase的best checkpoint。
     # 也可以填写相对path.data_root的具体checkpoint路径。
     checkpoint_path: "latest_best"
-    output_dir: "model/wakareeru-0.4.0-alpha.1"
-    artifact_version: "0.4.0-alpha.1"
+    output_dir: "model/wakareeru-0.4.1-alpha.1"
+    artifact_version: "0.4.1-alpha.1"
     force: false
   
