@@ -1,3 +1,4 @@
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -146,3 +147,73 @@ def test_resolve_noise_prediction_model_accepts_explicit_model() -> None:
     )
 
     assert resolved_model == "LR_pipeline_fixed.joblib"
+
+
+def test_old_noise_recovery_summary_uses_current_manual_review_state(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "dataset.sqlite"
+    review_path = tmp_path / "review" / "old_noise_recovery.csv"
+    review_path.parent.mkdir()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE crops (
+                id INTEGER PRIMARY KEY,
+                noise_review_label TEXT,
+                manual_corrected_label TEXT
+            )
+            """
+        )
+        conn.executemany(
+            "INSERT INTO crops VALUES (?, ?, ?)",
+            [
+                (1, "ok", None),
+                (2, "wrong_label", "corrected"),
+                (3, None, None),
+            ],
+        )
+    pd.DataFrame(
+        [
+            {
+                "crop_id": 1,
+                "probe_round": "round-a",
+                "active_lr_model": "current.joblib",
+                "probe_bucket": "likely_false_kill",
+            },
+            {
+                "crop_id": 2,
+                "probe_round": "round-a",
+                "active_lr_model": "current.joblib",
+                "probe_bucket": "likely_true_noise",
+            },
+            {
+                "crop_id": 3,
+                "probe_round": "round-a",
+                "active_lr_model": "current.joblib",
+                "probe_bucket": "uncertain",
+            },
+        ]
+    ).to_csv(review_path, index=False)
+    config = {
+        "path": {
+            "in_project_root": False,
+            "data_root": str(tmp_path),
+        },
+        "old_noise_recovery": {
+            "review_file_path": "review/old_noise_recovery.csv",
+        },
+    }
+
+    summary = stage_14.summarize_old_noise_recovery_review(
+        config=config,
+        db_path=db_path,
+    )
+
+    assert summary["pipeline_stage"] is False
+    assert summary["candidate_count"] == 3
+    assert summary["reviewed_count"] == 2
+    assert summary["unreviewed_count"] == 1
+    assert summary["manual_ok_count"] == 1
+    assert summary["manual_corrected_count"] == 1
+    assert summary["probe_rounds"] == ["round-a"]

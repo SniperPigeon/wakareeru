@@ -24,6 +24,7 @@ load_dotenv(override=False)
 from huggingface_hub import login
 import utils
 import constants
+from pipeline import old_noise_recovery
 
 logger = utils.get_logger("stage_10_train_loss_tracking")
 
@@ -471,10 +472,20 @@ def main(config: dict | None = None) -> None:
     model_dir.mkdir(parents=True, exist_ok=True)
     model_checkpoint_path = model_dir / model_checkpoint_name
     torch.save(head.state_dict(), model_checkpoint_path)
+    linear_head_artifact_path = old_noise_recovery.write_linear_head_artifact(
+        config=config,
+        loss_round_dir=loss_dir,
+        checkpoint_path=model_checkpoint_path,
+        feature_cache_path=feature_cache_dir / feature_cache_file,
+        label_map_path=label_map_path,
+        input_dim=embed_dim,
+        num_classes=len(label_to_id),
+    )
 
     logger.info("loss history 已保存至 %s", loss_history_path)
     logger.info("epoch history 已保存至 %s", epoch_history_path)
     logger.info("线性分类头 checkpoint 已保存至 %s", model_checkpoint_path)
+    logger.info("线性分类头 artifact 已保存至 %s", linear_head_artifact_path)
     utils.update_latest_loss_round_pointer(config, loss_dir)
     logger.info("最新 loss 轮次指针已更新为 %s", loss_dir.name)
 

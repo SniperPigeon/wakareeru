@@ -225,6 +225,7 @@ data/img/
 backup
 data/*.csv
 data/model
+data/db_backup
 data/feature_cache
 data/review
 data/dataset
