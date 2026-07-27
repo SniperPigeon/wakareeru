@@ -15,6 +15,12 @@ logger = utils.get_logger("stage_14_store_crops")
 
 CROP_SELECTION_MODES = {"filtered", "all"}
 NOISE_PREDICTION_SCOPES = {"active_model", "all_stored"}
+DUPLICATE_RESOLVED_STATUSES = {"auto_resolved", "confirmed"}
+DUPLICATE_REVIEW_STATUSES = {
+    "pending",
+    *DUPLICATE_RESOLVED_STATUSES,
+    "excluded",
+}
 
 
 def resolve_crop_selection_mode(crops_storage_config: dict) -> str:
@@ -36,6 +42,173 @@ def resolve_noise_prediction_scope(crops_storage_config: dict) -> str:
             f"{sorted(NOISE_PREDICTION_SCOPES)}"
         )
     return scope
+
+
+def load_crop_duplicate_groups(db_path: Path) -> pd.DataFrame:
+    with sqlite3.connect(db_path) as conn:
+        return pd.read_sql_query(
+            """
+            SELECT
+                id,
+                group_key,
+                representative_crop_id,
+                member_crop_ids_json,
+                candidate_labels_json,
+                member_count,
+                candidate_label_count,
+                review_status,
+                resolved_label,
+                proposal_model,
+                detected_at,
+                reviewed_at
+            FROM crop_duplicate_groups
+            ORDER BY id
+            """,
+            conn,
+        )
+
+
+def summarize_crop_duplicate_review(groups: pd.DataFrame) -> dict:
+    if groups.empty:
+        return {
+            "group_count": 0,
+            "member_crop_count": 0,
+            "pending_count": 0,
+            "auto_resolved_count": 0,
+            "confirmed_count": 0,
+            "excluded_count": 0,
+            "review_complete": True,
+            "tool_command": "python tools/crop_duplicate_review_gradio.py",
+        }
+    statuses = groups["review_status"].fillna("").astype(str)
+    unknown = sorted(set(statuses) - DUPLICATE_REVIEW_STATUSES)
+    if unknown:
+        raise ValueError(f"crop_duplicate_groups包含未知review_status: {unknown}")
+    summary = {
+        "group_count": int(len(groups)),
+        "member_crop_count": int(groups["member_count"].sum()),
+        "pending_count": int(statuses.eq("pending").sum()),
+        "auto_resolved_count": int(statuses.eq("auto_resolved").sum()),
+        "confirmed_count": int(statuses.eq("confirmed").sum()),
+        "excluded_count": int(statuses.eq("excluded").sum()),
+        "tool_command": "python tools/crop_duplicate_review_gradio.py",
+    }
+    summary["review_complete"] = summary["pending_count"] == 0
+    return summary
+
+
+def apply_crop_duplicate_resolutions(
+    metadata: pd.DataFrame,
+    *,
+    duplicate_groups: pd.DataFrame,
+    label_column: str,
+) -> tuple[pd.DataFrame, pd.Series, dict]:
+    """Collapse reviewed duplicate groups after normal crop filters are applied."""
+    if "crop_id" not in metadata.columns:
+        raise ValueError("重复crop去重要求metadata包含crop_id")
+    if label_column not in metadata.columns:
+        raise ValueError(f"重复crop去重要求metadata包含label列: {label_column!r}")
+
+    metadata = metadata.copy()
+    if duplicate_groups.empty or metadata.empty:
+        return (
+            metadata.reset_index(drop=True),
+            pd.Series(False, index=range(len(metadata)), dtype=bool),
+            {
+                "removed_count": 0,
+                "excluded_count": 0,
+                "label_override_count": 0,
+                "resolved_group_count": 0,
+            },
+        )
+
+    crop_ids = metadata["crop_id"].astype(int)
+    crop_id_set = set(crop_ids)
+    seen_member_ids: set[int] = set()
+    remove_ids: set[int] = set()
+    label_overrides: dict[int, str] = {}
+    excluded_count = 0
+    resolved_group_count = 0
+
+    for group in duplicate_groups.to_dict(orient="records"):
+        member_ids = {
+            int(value)
+            for value in json.loads(str(group["member_crop_ids_json"]))
+        }
+        overlap = seen_member_ids & member_ids
+        if overlap:
+            raise ValueError(
+                "crop_duplicate_groups成员重复出现在多个组: "
+                f"{sorted(overlap)[:10]}"
+            )
+        seen_member_ids.update(member_ids)
+        surviving_ids = sorted(member_ids & crop_id_set)
+        if not surviving_ids:
+            continue
+
+        status = str(group["review_status"])
+        if status == "pending":
+            continue
+        if status == "excluded":
+            remove_ids.update(surviving_ids)
+            excluded_count += len(surviving_ids)
+            resolved_group_count += 1
+            continue
+        if status not in DUPLICATE_RESOLVED_STATUSES:
+            raise ValueError(f"未知重复crop review_status: {status!r}")
+
+        resolved_label = str(group.get("resolved_label") or "").strip()
+        if not resolved_label:
+            raise ValueError(
+                f"已解析重复组缺少resolved_label: group_id={group['id']}"
+            )
+        group_rows = metadata[crop_ids.isin(surviving_ids)]
+        matching_ids = sorted(
+            group_rows.loc[
+                group_rows[label_column].astype(str).str.strip().eq(resolved_label),
+                "crop_id",
+            ]
+            .astype(int)
+            .tolist()
+        )
+        preferred_id = int(group["representative_crop_id"])
+        if preferred_id in matching_ids:
+            kept_id = preferred_id
+        elif matching_ids:
+            kept_id = matching_ids[0]
+        elif preferred_id in surviving_ids:
+            kept_id = preferred_id
+        else:
+            kept_id = surviving_ids[0]
+
+        remove_ids.update(set(surviving_ids) - {kept_id})
+        current_label = str(
+            metadata.loc[crop_ids.eq(kept_id), label_column].iloc[0]
+        ).strip()
+        if current_label != resolved_label:
+            label_overrides[kept_id] = resolved_label
+        resolved_group_count += 1
+
+    before_count = len(metadata)
+    metadata = metadata.loc[~crop_ids.isin(remove_ids)].copy()
+    changed_mask = pd.Series(False, index=metadata.index, dtype=bool)
+    for crop_id, resolved_label in label_overrides.items():
+        target = metadata["crop_id"].astype(int).eq(crop_id)
+        metadata.loc[target, label_column] = resolved_label
+        changed_mask.loc[target] = True
+
+    result = metadata.reset_index(drop=True)
+    changed_mask = changed_mask.reset_index(drop=True)
+    return (
+        result,
+        changed_mask,
+        {
+            "removed_count": before_count - len(result),
+            "excluded_count": excluded_count,
+            "label_override_count": len(label_overrides),
+            "resolved_group_count": resolved_group_count,
+        },
+    )
 
 
 def label_to_ascii(label: str, fallback: str = "label") -> str:
@@ -471,6 +644,7 @@ def write_dataset_manifest(
     crops_storage_config: dict,
     resolved_noise_prediction_model: str | None,
     old_noise_recovery_review: dict,
+    crop_duplicate_review: dict,
 ) -> None:
     selection_mode = resolve_crop_selection_mode(crops_storage_config)
     prediction_scope = resolve_noise_prediction_scope(crops_storage_config)
@@ -525,6 +699,7 @@ def write_dataset_manifest(
             ],
         },
         "old_noise_recovery_review": old_noise_recovery_review,
+        "crop_duplicate_review": crop_duplicate_review,
         "notes": "Generated by stage_14_store_crops.py",
     }
     manifest_path.write_text(
@@ -632,6 +807,18 @@ def main(config: dict | None = None) -> None:
         db_path=db_path,
     )
     log_old_noise_recovery_preflight(old_noise_recovery_review)
+    duplicate_groups = load_crop_duplicate_groups(db_path)
+    crop_duplicate_review = summarize_crop_duplicate_review(duplicate_groups)
+    if (
+        config["crop_duplicate_detection"]["require_review_complete_before_store"]
+        and not crop_duplicate_review["review_complete"]
+    ):
+        logger.warning(
+            "重复crop仍有%d个跨标签组未复核；Stage 14中断。请运行：%s",
+            crop_duplicate_review["pending_count"],
+            crop_duplicate_review["tool_command"],
+        )
+        return constants.STAGE_INTERRUPT
     if (
         not export_all_crops
         and crops_storage_config["exclude_predicted_noise"]
@@ -791,6 +978,46 @@ def main(config: dict | None = None) -> None:
                 before_count - len(metadata),
                 len(metadata),
             )
+        metadata, duplicate_changed_mask, duplicate_apply_summary = (
+            apply_crop_duplicate_resolutions(
+                metadata,
+                duplicate_groups=duplicate_groups,
+                label_column=label_column,
+            )
+        )
+        crop_duplicate_review["stage_14_apply"] = duplicate_apply_summary
+        if duplicate_changed_mask.any():
+            invalidate_columns = list(
+                crops_storage_config["manual_correction_invalidate_metadata_columns"]
+            )
+            metadata = invalidate_metadata_for_manual_corrections(
+                metadata,
+                corrected_mask=duplicate_changed_mask,
+                columns=invalidate_columns,
+                label_column=label_column,
+            )
+            metadata = refill_unique_metadata_for_manual_corrections(
+                metadata,
+                corrected_mask=duplicate_changed_mask,
+                label_column=label_column,
+                operator_columns=list(
+                    crops_storage_config["manual_correction_refill_operator_columns"]
+                ),
+                submodel_bandai_columns=list(
+                    crops_storage_config[
+                        "manual_correction_refill_submodel_bandai_columns"
+                    ]
+                ),
+            )
+        logger.info(
+            "应用重复crop解析：处理groups=%d，移除=%d，整组排除crop=%d，"
+            "label覆盖=%d，保留=%d。",
+            duplicate_apply_summary["resolved_group_count"],
+            duplicate_apply_summary["removed_count"],
+            duplicate_apply_summary["excluded_count"],
+            duplicate_apply_summary["label_override_count"],
+            len(metadata),
+        )
         #按格式变换ASCII label
         metadata = build_en_label(
             metadata,
@@ -886,6 +1113,7 @@ def main(config: dict | None = None) -> None:
             crops_storage_config=crops_storage_config,
             resolved_noise_prediction_model=resolved_noise_prediction_model,
             old_noise_recovery_review=old_noise_recovery_review,
+            crop_duplicate_review=crop_duplicate_review,
         )
 
         logger.info("crop图像保存完成，已成功保存%d条crop数据。", len(metadata))
