@@ -323,7 +323,7 @@ def save_resolution(
         conn.execute("PRAGMA foreign_keys = ON")
         group_row = conn.execute(
             """
-            SELECT member_crop_ids_json
+            SELECT member_crop_ids_json, review_status
             FROM crop_duplicate_groups
             WHERE id = ?
             """,
@@ -332,6 +332,7 @@ def save_resolution(
         if group_row is None:
             raise gr.Error(f"找不到duplicate group id={group_id}")
         member_ids = [int(value) for value in json.loads(str(group_row[0]))]
+        previous_status = str(group_row[1])
         updated = conn.execute(
             """
             UPDATE crop_duplicate_groups
@@ -360,7 +361,41 @@ def save_resolution(
                 exclusion_reason=exclusion_reason,
                 note=note,
             )
+        elif previous_status == REVIEW_STATUS_EXCLUDED:
+            clear_group_owned_crop_exclusions(
+                conn,
+                crop_ids=member_ids,
+            )
         conn.commit()
+
+
+def clear_group_owned_crop_exclusions(
+    conn: sqlite3.Connection,
+    *,
+    crop_ids: list[int],
+) -> None:
+    if not crop_ids:
+        return
+    crop_placeholders = ",".join("?" for _ in crop_ids)
+    exclusion_reasons = sorted(GROUP_EXCLUSION_REASONS)
+    reason_placeholders = ",".join("?" for _ in exclusion_reasons)
+    conn.execute(
+        f"""
+        UPDATE crops
+        SET noise_review_label = NULL,
+            noise_review_note = NULL,
+            noise_reviewed_at = NULL,
+            noise_review_score_col = NULL
+        WHERE id IN ({crop_placeholders})
+          AND noise_review_score_col = ?
+          AND noise_review_label IN ({reason_placeholders})
+        """,
+        (
+            *[int(crop_id) for crop_id in crop_ids],
+            REVIEW_SOURCE,
+            *exclusion_reasons,
+        ),
+    )
 
 
 def mark_crops_excluded(
@@ -381,9 +416,7 @@ def mark_crops_excluded(
         SET noise_review_label = ?,
             noise_review_note = ?,
             noise_reviewed_at = CURRENT_TIMESTAMP,
-            noise_review_score_col = ?,
-            manual_corrected_label = NULL,
-            manual_corrected_at = NULL
+            noise_review_score_col = ?
         WHERE id IN ({placeholders})
         """,
         (

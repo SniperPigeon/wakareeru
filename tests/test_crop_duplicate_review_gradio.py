@@ -133,9 +133,80 @@ def test_group_exclusion_writes_structured_reason_to_all_crops(tmp_path: Path) -
 
     assert group == ("excluded", "bad_crop", "whole group is unusable")
     assert crops == [
+        (
+            "bad_crop",
+            "whole group is unusable",
+            "crop_duplicate_review",
+            "old-correction",
+            "2026-01-01",
+        ),
         ("bad_crop", "whole group is unusable", "crop_duplicate_review", None, None),
         ("bad_crop", "whole group is unusable", "crop_duplicate_review", None, None),
-        ("bad_crop", "whole group is unusable", "crop_duplicate_review", None, None),
+    ]
+
+
+def test_reconfirm_group_clears_only_group_owned_exclusions(tmp_path: Path) -> None:
+    db_path = tmp_path / "review.sqlite"
+    _create_review_db(db_path)
+    _configure_tool(db_path)
+
+    review_tool.save_resolution(
+        group_id=1,
+        status=review_tool.REVIEW_STATUS_EXCLUDED,
+        resolved_label=None,
+        exclusion_reason="bad_crop",
+        note="whole group is unusable",
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE crops
+            SET noise_review_label = 'ok',
+                noise_review_note = 'reviewed independently',
+                noise_reviewed_at = '2026-02-01',
+                noise_review_score_col = 'noise_review_gradio'
+            WHERE id = 2
+            """
+        )
+        conn.commit()
+
+    review_tool.save_resolution(
+        group_id=1,
+        status=review_tool.REVIEW_STATUS_CONFIRMED,
+        resolved_label="A",
+        note="reconfirmed",
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        group = conn.execute(
+            """
+            SELECT review_status, resolved_label, exclusion_reason, review_note
+            FROM crop_duplicate_groups
+            WHERE id = 1
+            """
+        ).fetchone()
+        crops = conn.execute(
+            """
+            SELECT noise_review_label, noise_review_note,
+                   noise_reviewed_at, noise_review_score_col,
+                   manual_corrected_label, manual_corrected_at
+            FROM crops
+            ORDER BY id
+            """
+        ).fetchall()
+
+    assert group == ("confirmed", "A", None, "reconfirmed")
+    assert crops == [
+        (None, None, None, None, "old-correction", "2026-01-01"),
+        (
+            "ok",
+            "reviewed independently",
+            "2026-02-01",
+            "noise_review_gradio",
+            None,
+            None,
+        ),
+        (None, None, None, None, None, None),
     ]
 
 
@@ -172,7 +243,11 @@ def test_member_exclusion_reconciles_or_removes_group(tmp_path: Path) -> None:
     assert json.loads(group[0]) == [2, 3]
     assert json.loads(group[1]) == ["B"]
     assert group[2:] == (2, 1, "auto_resolved", "B")
-    assert excluded_crop == ("out_of_label_space", "crop_duplicate_review", None)
+    assert excluded_crop == (
+        "out_of_label_space",
+        "crop_duplicate_review",
+        "old-correction",
+    )
 
     review_tool.exclude_member(
         group_id=1,
