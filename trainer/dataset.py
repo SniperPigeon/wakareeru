@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 
 
 class CropDataset(Dataset):
-    """Dataset for crop images exported by stage_14_store_crops."""
+    """Dataset for crop images exported by stage_16_store_crops."""
 
     def __init__(
         self,

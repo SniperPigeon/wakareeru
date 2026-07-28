@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS images (
 
 -- Canonical and sole source for the generated dataset/l10n_metadata.json artifact.
 -- The similarly named fields on images are retained as legacy per-image metadata,
--- but stage_14 must not use them to construct localized label metadata.
+-- but stage_16 must not use them to construct localized label metadata.
 CREATE TABLE IF NOT EXISTS label_metadata (
     label_ja          TEXT PRIMARY KEY,
     label_en          TEXT NOT NULL,
@@ -155,3 +155,52 @@ CREATE INDEX IF NOT EXISTS idx_crops_image_id   ON crops(image_id);
 CREATE INDEX IF NOT EXISTS idx_crops_series     ON crops(series);
 CREATE INDEX IF NOT EXISTS idx_crops_power_type ON crops(power_type);
 CREATE INDEX IF NOT EXISTS idx_crops_detector   ON crops(detector_model, nms_iou_threshold);
+
+-- One row per physical crop duplicated through multiple manifest image rows.
+-- Source images and crop provenance remain untouched; Stage 16 consumes the
+-- reviewed resolution and exports at most one member from each group.
+CREATE TABLE IF NOT EXISTS crop_duplicate_groups (
+    id                         INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_key                  TEXT NOT NULL UNIQUE,
+    source_sha1                TEXT NOT NULL,
+    detector_model             TEXT NOT NULL,
+    nms_iou_threshold          REAL NOT NULL,
+    representative_crop_id     INTEGER NOT NULL REFERENCES crops(id),
+    member_crop_ids_json       TEXT NOT NULL,
+    candidate_labels_json      TEXT NOT NULL,
+    member_count               INTEGER NOT NULL,
+    candidate_label_count      INTEGER NOT NULL,
+    box_x1                     REAL NOT NULL,
+    box_y1                     REAL NOT NULL,
+    box_x2                     REAL NOT NULL,
+    box_y2                     REAL NOT NULL,
+    global_top1_label          TEXT,
+    global_top1_prob           REAL,
+    global_top_k_json          TEXT NOT NULL DEFAULT '[]',
+    proposed_label             TEXT,
+    proposed_candidate_prob    REAL,
+    proposed_candidate_margin  REAL,
+    candidate_scores_json      TEXT NOT NULL DEFAULT '[]',
+    proposal_model             TEXT,
+    review_status              TEXT NOT NULL DEFAULT 'pending'
+                               CHECK (review_status IN (
+                                   'pending', 'auto_resolved', 'confirmed', 'excluded'
+                               )),
+    resolved_label             TEXT,
+    exclusion_reason           TEXT
+                               CHECK (
+                                   exclusion_reason IS NULL
+                                   OR exclusion_reason IN (
+                                       'bad_crop', 'out_of_label_space'
+                                   )
+                               ),
+    review_note                TEXT,
+    reviewed_at                TEXT,
+    detected_at                TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at                 TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_crop_duplicate_groups_status
+    ON crop_duplicate_groups(review_status);
+CREATE INDEX IF NOT EXISTS idx_crop_duplicate_groups_sha1
+    ON crop_duplicate_groups(source_sha1);

@@ -1,3 +1,11 @@
+# ============== Example Pipeline Configuration File ==============
+# This is an example configuration file for the Wakareeru pipeline.
+# It contains all the available configuration options with their default values.
+# You can copy this file to config/pipeline_config.yaml and modify the values as needed.
+# Default values are provided for reference, as they are set in full run mode.
+# If you need to run some experiments with smaller datasets, you can turn off some full series settings.
+
+
 # Pipeline configuration file.
 path:
   # If true, data_root is resolved under the repository root.
@@ -26,7 +34,7 @@ crawler:
   # However, shared series with other operators will still be included 
   # even if the operator is not active.
   active_operators: ["JR東日本", "JR貨物", "JR東海", "JR西日本","JR北海道", "JR四国", "JR九州", ]
-  full_series_crawling: false
+  full_series_crawling: true
   manifest_max_files_per_category: 50
   # 0 = only root category; positive numbers recurse into subcategories; -1 = unlimited.
   manifest_max_depth: 7
@@ -34,7 +42,7 @@ crawler:
   manifest_reprocess: false
   download_batch_size: 500
   # Keep this at 3 or lower for Wikimedia etiquette unless you have a stronger reason.
-  download_workers: 2
+  download_workers: 1
   download_request_interval: 0.3
   # -1 = no cap; positive numbers download at most that many pending rows.
   download_total_limit: -1
@@ -185,7 +193,7 @@ crop_duplicate_detection:
   prediction_device: "auto"
   prediction_batch_size: 32
   prediction_top_k: 5
-  require_review_complete_before_store: false
+  require_review_complete_before_store: true
 
 crops_storage:
   format: 'flatten' #存储格式，可选'flatten'或'nested'。'flatten'表示将所有crop数据存储在同一层级的表中，'nested'表示按照series或submodel等层级结构存储。

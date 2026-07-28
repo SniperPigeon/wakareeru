@@ -53,6 +53,7 @@ async def fetch_all(operators: list[tuple[str, str, str]]) -> dict[str, tuple[st
 
 def parse_vehicle_wikitext(lines: list[str]) -> list[dict]:
     link_re = re.compile(r'\[\[([^\]|]+)(?:\|([^\]]+))?\]\]')
+    definition_label_re = re.compile(r'^;\s*\[\[[^\]]+\]\]\s*（([^）]+)）')
 
     # 保留既有车型格式，并补充 0系及 N700S系等数字后的字母后缀车型。
     series_re = re.compile(
@@ -66,6 +67,7 @@ def parse_vehicle_wikitext(lines: list[str]) -> list[dict]:
     results = []
     current_h2 = ""
     current_h3 = ""
+    current_h4 = ""
     current_subtype = ""
     # 跳过 概要，脚注，相关项等非车种列表部分
     skip_sections = constants.WIKI_PAGE_SKIP_SECTIONS
@@ -77,19 +79,29 @@ def parse_vehicle_wikitext(lines: list[str]) -> list[dict]:
         if m:
             current_h2 = m.group(1)
             current_h3 = ""
+            current_h4 = ""
             current_subtype = ""
             continue
 
         m = re.match(r'^=== (.+?) ===$', line)
         if m:
             current_h3 = m.group(1)
+            current_h4 = ""
             current_subtype = ""
+            continue
+
+        m = re.match(r'^==== (.+?) ====$', line)
+        if m:
+            current_h4 = m.group(1)
             continue
 
         if current_h2 in skip_sections:
             continue
 
-        if not line.lstrip().startswith('*'):
+        stripped_line = line.lstrip()
+        is_bullet_item = stripped_line.startswith('*')
+        is_definition_item = stripped_line.startswith(';')
+        if not is_bullet_item and not is_definition_item:
             continue
 
         # 单星开头的粗体行（* '''xxx'''）才更新 subtype，** 及以上层级不更新
@@ -97,17 +109,35 @@ def parse_vehicle_wikitext(lines: list[str]) -> list[dict]:
         if subtype:
             current_subtype = subtype.group(1).strip().strip('[]')
 
+        status_heading = current_h2
+        type_heading = current_h3
+        if is_definition_item and current_h2 == "新幹線車両":
+            status_heading = current_h3
+            type_heading = (
+                "新幹線電車"
+                if current_h3 == "現有車両" or current_h4 == "電車"
+                else "その他新幹線車両"
+            )
+
+        definition_label_match = (
+            definition_label_re.match(stripped_line) if is_definition_item else None
+        )
+
         for m in link_re.finditer(line):
             page  = m.group(1)
             label = m.group(2) or page
             label = label.split('・')[0].split('（')[0].strip()
+            if definition_label_match:
+                explicit_label = definition_label_match.group(1).strip()
+                if series_re.match(explicit_label):
+                    label = explicit_label
 
             if series_re.match(label):
                 results.append({
                     "series":     label,
                     "wiki_title": page,
-                    "status":     constants.STATUS_MAP.get(current_h2, current_h2),
-                    "type":       current_h3,
+                    "status":     constants.STATUS_MAP.get(status_heading, status_heading),
+                    "type":       type_heading,
                     "subtype":    current_subtype,
                 })
 

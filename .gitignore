@@ -225,9 +225,11 @@ data/img/
 backup
 data/*.csv
 data/model
+data/db_backup
 data/feature_cache
 data/review
 data/dataset
 data/loss_analysis
 data/trainer_feature_cache
 data/trainer_runs
+data/*.sqlite

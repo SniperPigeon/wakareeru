@@ -1,5 +1,4 @@
 import json
-import os
 import re
 import sqlite3
 import time
@@ -12,15 +11,213 @@ from tqdm.auto import tqdm
 import constants
 import utils
 
-import joblib
-from sklearn.pipeline import Pipeline
-from sklearn.linear_model import LogisticRegression
-from lr_model import register_legacy_main_alias
+logger = utils.get_logger("stage_16_store_crops")
 
-logger = utils.get_logger("stage_14_store_crops")
+CROP_SELECTION_MODES = {"filtered", "all"}
+NOISE_PREDICTION_SCOPES = {"active_model", "all_stored"}
+DUPLICATE_RESOLVED_STATUSES = {"auto_resolved", "confirmed"}
+DUPLICATE_REVIEW_STATUSES = {
+    "pending",
+    *DUPLICATE_RESOLVED_STATUSES,
+    "excluded",
+}
 
 
+def resolve_crop_selection_mode(crops_storage_config: dict) -> str:
+    """Validate and normalize the configured dataset crop selection mode."""
+    selection_mode = str(crops_storage_config["selection_mode"]).strip().lower()
+    if selection_mode not in CROP_SELECTION_MODES:
+        raise ValueError(
+            "crops_storage.selection_mode 必须是以下值之一: "
+            f"{sorted(CROP_SELECTION_MODES)}"
+        )
+    return selection_mode
 
+
+def resolve_noise_prediction_scope(crops_storage_config: dict) -> str:
+    scope = str(crops_storage_config["noise_prediction_scope"]).strip().lower()
+    if scope not in NOISE_PREDICTION_SCOPES:
+        raise ValueError(
+            "crops_storage.noise_prediction_scope 必须是以下值之一: "
+            f"{sorted(NOISE_PREDICTION_SCOPES)}"
+        )
+    return scope
+
+
+def load_crop_duplicate_groups(db_path: Path) -> pd.DataFrame:
+    with sqlite3.connect(db_path) as conn:
+        return pd.read_sql_query(
+            """
+            SELECT
+                id,
+                group_key,
+                representative_crop_id,
+                member_crop_ids_json,
+                candidate_labels_json,
+                member_count,
+                candidate_label_count,
+                review_status,
+                resolved_label,
+                exclusion_reason,
+                proposal_model,
+                detected_at,
+                reviewed_at
+            FROM crop_duplicate_groups
+            ORDER BY id
+            """,
+            conn,
+        )
+
+
+def summarize_crop_duplicate_review(groups: pd.DataFrame) -> dict:
+    if groups.empty:
+        return {
+            "group_count": 0,
+            "member_crop_count": 0,
+            "pending_count": 0,
+            "auto_resolved_count": 0,
+            "confirmed_count": 0,
+            "excluded_count": 0,
+            "excluded_reason_counts": {},
+            "review_complete": True,
+            "tool_command": "python tools/crop_duplicate_review_gradio.py",
+        }
+    statuses = groups["review_status"].fillna("").astype(str)
+    unknown = sorted(set(statuses) - DUPLICATE_REVIEW_STATUSES)
+    if unknown:
+        raise ValueError(f"crop_duplicate_groups包含未知review_status: {unknown}")
+    summary = {
+        "group_count": int(len(groups)),
+        "member_crop_count": int(groups["member_count"].sum()),
+        "pending_count": int(statuses.eq("pending").sum()),
+        "auto_resolved_count": int(statuses.eq("auto_resolved").sum()),
+        "confirmed_count": int(statuses.eq("confirmed").sum()),
+        "excluded_count": int(statuses.eq("excluded").sum()),
+        "excluded_reason_counts": (
+            groups.loc[statuses.eq("excluded"), "exclusion_reason"]
+            .fillna("unspecified")
+            .astype(str)
+            .value_counts()
+            .to_dict()
+        ),
+        "tool_command": "python tools/crop_duplicate_review_gradio.py",
+    }
+    summary["review_complete"] = summary["pending_count"] == 0
+    return summary
+
+
+def apply_crop_duplicate_resolutions(
+    metadata: pd.DataFrame,
+    *,
+    duplicate_groups: pd.DataFrame,
+    label_column: str,
+) -> tuple[pd.DataFrame, pd.Series, dict]:
+    """Collapse reviewed duplicate groups after normal crop filters are applied."""
+    if "crop_id" not in metadata.columns:
+        raise ValueError("重复crop去重要求metadata包含crop_id")
+    if label_column not in metadata.columns:
+        raise ValueError(f"重复crop去重要求metadata包含label列: {label_column!r}")
+
+    metadata = metadata.copy()
+    if duplicate_groups.empty or metadata.empty:
+        return (
+            metadata.reset_index(drop=True),
+            pd.Series(False, index=range(len(metadata)), dtype=bool),
+            {
+                "removed_count": 0,
+                "excluded_count": 0,
+                "label_override_count": 0,
+                "resolved_group_count": 0,
+            },
+        )
+
+    crop_ids = metadata["crop_id"].astype(int)
+    crop_id_set = set(crop_ids)
+    seen_member_ids: set[int] = set()
+    remove_ids: set[int] = set()
+    label_overrides: dict[int, str] = {}
+    excluded_count = 0
+    resolved_group_count = 0
+
+    for group in duplicate_groups.to_dict(orient="records"):
+        member_ids = {
+            int(value)
+            for value in json.loads(str(group["member_crop_ids_json"]))
+        }
+        overlap = seen_member_ids & member_ids
+        if overlap:
+            raise ValueError(
+                "crop_duplicate_groups成员重复出现在多个组: "
+                f"{sorted(overlap)[:10]}"
+            )
+        seen_member_ids.update(member_ids)
+        surviving_ids = sorted(member_ids & crop_id_set)
+        if not surviving_ids:
+            continue
+
+        status = str(group["review_status"])
+        if status == "pending":
+            continue
+        if status == "excluded":
+            remove_ids.update(surviving_ids)
+            excluded_count += len(surviving_ids)
+            resolved_group_count += 1
+            continue
+        if status not in DUPLICATE_RESOLVED_STATUSES:
+            raise ValueError(f"未知重复crop review_status: {status!r}")
+
+        resolved_label = str(group.get("resolved_label") or "").strip()
+        if not resolved_label:
+            raise ValueError(
+                f"已解析重复组缺少resolved_label: group_id={group['id']}"
+            )
+        group_rows = metadata[crop_ids.isin(surviving_ids)]
+        matching_ids = sorted(
+            group_rows.loc[
+                group_rows[label_column].astype(str).str.strip().eq(resolved_label),
+                "crop_id",
+            ]
+            .astype(int)
+            .tolist()
+        )
+        preferred_id = int(group["representative_crop_id"])
+        if preferred_id in matching_ids:
+            kept_id = preferred_id
+        elif matching_ids:
+            kept_id = matching_ids[0]
+        elif preferred_id in surviving_ids:
+            kept_id = preferred_id
+        else:
+            kept_id = surviving_ids[0]
+
+        remove_ids.update(set(surviving_ids) - {kept_id})
+        current_label = str(
+            metadata.loc[crop_ids.eq(kept_id), label_column].iloc[0]
+        ).strip()
+        if current_label != resolved_label:
+            label_overrides[kept_id] = resolved_label
+        resolved_group_count += 1
+
+    before_count = len(metadata)
+    metadata = metadata.loc[~crop_ids.isin(remove_ids)].copy()
+    changed_mask = pd.Series(False, index=metadata.index, dtype=bool)
+    for crop_id, resolved_label in label_overrides.items():
+        target = metadata["crop_id"].astype(int).eq(crop_id)
+        metadata.loc[target, label_column] = resolved_label
+        changed_mask.loc[target] = True
+
+    result = metadata.reset_index(drop=True)
+    changed_mask = changed_mask.reset_index(drop=True)
+    return (
+        result,
+        changed_mask,
+        {
+            "removed_count": before_count - len(result),
+            "excluded_count": excluded_count,
+            "label_override_count": len(label_overrides),
+            "resolved_group_count": resolved_group_count,
+        },
+    )
 
 
 def label_to_ascii(label: str, fallback: str = "label") -> str:
@@ -332,13 +529,135 @@ def flush_crop_save_updates(db_path: Path, updates: list[tuple[str, int]]) -> No
         conn.commit()
 
 
+def summarize_old_noise_recovery_review(
+    *,
+    config: dict,
+    db_path: Path,
+) -> dict:
+    review_path = utils.join_data_root(
+        config["old_noise_recovery"]["review_file_path"],
+        config=config,
+    )
+    summary = {
+        "workflow": "manual_auxiliary_tool",
+        "pipeline_stage": False,
+        "tool_command": "python tools/old_noise_recovery_review_gradio.py",
+        "review_file": str(
+            config["old_noise_recovery"]["review_file_path"]
+        ),
+        "resolved_review_file": str(review_path),
+    }
+    if not review_path.is_file():
+        return {
+            **summary,
+            "status": "missing",
+            "candidate_count": 0,
+            "reviewed_count": 0,
+            "unreviewed_count": 0,
+        }
+
+    probe = pd.read_csv(review_path)
+    if "crop_id" not in probe.columns:
+        raise ValueError(f"旧噪声恢复review CSV缺少crop_id列: {review_path}")
+    probe["crop_id"] = probe["crop_id"].astype(int)
+    probe = probe.drop_duplicates("crop_id", keep="last")
+    with sqlite3.connect(db_path) as conn:
+        reviews = pd.read_sql_query(
+            """
+            SELECT
+                id AS crop_id,
+                noise_review_label,
+                manual_corrected_label
+            FROM crops
+            """,
+            conn,
+        )
+    probe = probe.merge(reviews, on="crop_id", how="left")
+    reviewed = (
+        probe["noise_review_label"].fillna("").astype(str).str.strip().ne("")
+        | probe["manual_corrected_label"].fillna("").astype(str).str.strip().ne("")
+    )
+    manual_ok = (
+        probe["noise_review_label"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .eq(constants.NOISE_REVIEW_LABEL_OK)
+    )
+    corrected = (
+        probe["manual_corrected_label"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .ne("")
+    )
+    probe_rounds = (
+        sorted(probe["probe_round"].dropna().astype(str).unique())
+        if "probe_round" in probe.columns
+        else []
+    )
+    active_lr_models = (
+        sorted(probe["active_lr_model"].dropna().astype(str).unique())
+        if "active_lr_model" in probe.columns
+        else []
+    )
+    bucket_counts = (
+        {
+            str(bucket): int(count)
+            for bucket, count in probe["probe_bucket"].value_counts().items()
+        }
+        if "probe_bucket" in probe.columns
+        else {}
+    )
+    return {
+        **summary,
+        "status": "available",
+        "candidate_count": int(len(probe)),
+        "reviewed_count": int(reviewed.sum()),
+        "unreviewed_count": int((~reviewed).sum()),
+        "manual_ok_count": int(manual_ok.sum()),
+        "manual_corrected_count": int(corrected.sum()),
+        "probe_rounds": probe_rounds,
+        "active_lr_models": active_lr_models,
+        "bucket_counts": bucket_counts,
+    }
+
+
+def log_old_noise_recovery_preflight(summary: dict) -> None:
+    if summary["status"] == "missing":
+        logger.warning(
+            "旧噪声恢复review是导出前人工辅助流程，不是pipeline stage；"
+            "当前未找到probe CSV：%s。需要复核时先运行：%s",
+            summary["resolved_review_file"],
+            summary["tool_command"],
+        )
+        return
+    log = logger.warning if summary["unreviewed_count"] else logger.info
+    log(
+        "旧噪声恢复review（非pipeline stage）：候选%d，已复核%d，未复核%d，"
+        "人工ok=%d，人工纠正=%d。工具：%s",
+        summary["candidate_count"],
+        summary["reviewed_count"],
+        summary["unreviewed_count"],
+        summary["manual_ok_count"],
+        summary["manual_corrected_count"],
+        summary["tool_command"],
+    )
+
+
 def write_dataset_manifest(
     *,
     manifest_path: Path,
     metadata: pd.DataFrame,
     labels: pd.DataFrame,
     crops_storage_config: dict,
+    resolved_noise_prediction_model: str | None,
+    old_noise_recovery_review: dict,
+    crop_duplicate_review: dict,
 ) -> None:
+    selection_mode = resolve_crop_selection_mode(crops_storage_config)
+    prediction_scope = resolve_noise_prediction_scope(crops_storage_config)
+    filters_enabled = selection_mode == "filtered"
     manifest = {
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
         "metadata_file": crops_storage_config["metadata_file_name"],
@@ -349,6 +668,7 @@ def write_dataset_manifest(
         "label_column": crops_storage_config["label_column"],
         "image_extension": crops_storage_config["image_extension"],
         "crop_pad_frac": crops_storage_config["crop_pad_frac"],
+        "selection_mode": selection_mode,
         "manual_reviewed_count": int(metadata["manual_reviewed"].sum()),
         "manual_corrected_count": int(
             metadata["manual_corrected_label"].notna().sum()
@@ -356,11 +676,25 @@ def write_dataset_manifest(
             else 0
         ),
         "noise_filtering": {
-            "exclude_manual_noise": crops_storage_config["exclude_manual_noise"],
+            "save_only_manual_reviewed": (
+                filters_enabled and crops_storage_config["save_only_manual_reviewed"]
+            ),
+            "exclude_manual_noise": (
+                filters_enabled and crops_storage_config["exclude_manual_noise"]
+            ),
             "manual_noise_labels": crops_storage_config["manual_noise_labels"],
-            "exclude_predicted_noise": crops_storage_config["exclude_predicted_noise"],
-            "noise_prediction_round": crops_storage_config["noise_prediction_round"],
-            "noise_prediction_file_name": crops_storage_config["noise_prediction_file_name"],
+            "exclude_predicted_noise": (
+                filters_enabled and crops_storage_config["exclude_predicted_noise"]
+            ),
+            "prediction_source": "crops.noise_predicted_label/noise_predicted_prob",
+            "prediction_scope": prediction_scope,
+            "configured_prediction_model": (
+                crops_storage_config["noise_prediction_model"]
+                if prediction_scope == "active_model"
+                else None
+            ),
+            "resolved_prediction_model": resolved_noise_prediction_model,
+            "human_review_overrides_prediction": True,
             "predicted_noise_labels": crops_storage_config["predicted_noise_labels"],
             "predicted_noise_min_prob": crops_storage_config["predicted_noise_min_prob"],
             "manual_correction_invalidate_metadata_columns": crops_storage_config[
@@ -373,7 +707,9 @@ def write_dataset_manifest(
                 "manual_correction_refill_submodel_bandai_columns"
             ],
         },
-        "notes": "Generated by stage_14_store_crops.py",
+        "old_noise_recovery_review": old_noise_recovery_review,
+        "crop_duplicate_review": crop_duplicate_review,
+        "notes": "Generated by stage_16_store_crops.py",
     }
     manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2),
@@ -381,21 +717,87 @@ def write_dataset_manifest(
     )
 
 
-def load_noise_predictions(config: dict, crops_storage_config: dict) -> pd.DataFrame:
-    prediction_round = crops_storage_config["noise_prediction_round"]
-    prediction_dir = utils.get_loss_round_dir(
-        config=config,
-        active_round=prediction_round,
+def resolve_noise_prediction_model(
+    config: dict,
+    crops_storage_config: dict,
+) -> str:
+    configured_model = str(crops_storage_config["noise_prediction_model"]).strip()
+    if not configured_model:
+        raise ValueError("crops_storage.noise_prediction_model 不能为空")
+    if configured_model != "latest":
+        return configured_model
+
+    model_dir = utils.join_data_root(config["path"]["model_dir"], config=config)
+    pointer_path = (
+        model_dir
+        / config["logistic_regression_filter"]["model_pointer_path"]
     )
-    prediction_path = prediction_dir / crops_storage_config["noise_prediction_file_name"]
-    if not prediction_path.exists():
-        raise FileNotFoundError(f"Expected LR prediction CSV not found: {prediction_path}")
-    predictions = pd.read_csv(prediction_path)
-    required_columns = {"crop_id", "noise_predicted_prob", "noise_predicted_label"}
-    missing_columns = required_columns - set(predictions.columns)
+    if not pointer_path.is_file():
+        raise FileNotFoundError(f"Latest LR model pointer not found: {pointer_path}")
+    resolved_model = pointer_path.read_text(encoding="utf-8").strip()
+    if not resolved_model:
+        raise ValueError(f"Latest LR model pointer is empty: {pointer_path}")
+    return resolved_model
+
+
+def build_db_predicted_noise_mask(
+    metadata: pd.DataFrame,
+    *,
+    corrected_mask: pd.Series,
+    crops_storage_config: dict,
+    prediction_scope: str,
+    active_prediction_model: str | None,
+) -> pd.Series:
+    prediction_scope = str(prediction_scope).strip().lower()
+    if prediction_scope not in NOISE_PREDICTION_SCOPES:
+        raise ValueError(
+            "prediction_scope 必须是以下值之一: "
+            f"{sorted(NOISE_PREDICTION_SCOPES)}"
+        )
+    required_columns = {
+        "noise_review_label",
+        "noise_predicted_prob",
+        "noise_predicted_label",
+    }
+    if prediction_scope == "active_model":
+        required_columns.add("noise_prediction_model")
+        if not active_prediction_model:
+            raise ValueError("active_model范围要求提供active_prediction_model")
+    missing_columns = required_columns - set(metadata.columns)
     if missing_columns:
-        raise ValueError(f"LR prediction CSV missing columns: {sorted(missing_columns)}")
-    return predictions
+        raise ValueError(f"crop数据库预测字段缺失: {sorted(missing_columns)}")
+
+    review_label = (
+        metadata["noise_review_label"].fillna("").astype(str).str.strip()
+    )
+    predicted_prob = pd.to_numeric(
+        metadata["noise_predicted_prob"],
+        errors="coerce",
+    ).fillna(0.0)
+    human_override = (
+        review_label.eq(constants.NOISE_REVIEW_LABEL_OK)
+        | corrected_mask.astype(bool)
+    )
+    predicted_noise = (
+        metadata["noise_predicted_label"].isin(
+            set(crops_storage_config["predicted_noise_labels"])
+        )
+        & (
+            predicted_prob
+            >= float(crops_storage_config["predicted_noise_min_prob"])
+        )
+        & ~human_override
+    )
+    if prediction_scope == "all_stored":
+        return predicted_noise
+    return (
+        metadata["noise_prediction_model"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .eq(active_prediction_model)
+        & predicted_noise
+    )
 
 
 def main(config: dict | None = None) -> None:
@@ -405,14 +807,58 @@ def main(config: dict | None = None) -> None:
     utils.init_db(config=config)
     db_path = utils.join_data_root(config["path"]["db_path"], config=config)
     crops_storage_config = config["crops_storage"]
-    
+    selection_mode = resolve_crop_selection_mode(crops_storage_config)
+    prediction_scope = resolve_noise_prediction_scope(crops_storage_config)
+    export_all_crops = selection_mode == "all"
+    resolved_noise_prediction_model = None
+    old_noise_recovery_review = summarize_old_noise_recovery_review(
+        config=config,
+        db_path=db_path,
+    )
+    log_old_noise_recovery_preflight(old_noise_recovery_review)
+    duplicate_groups = load_crop_duplicate_groups(db_path)
+    crop_duplicate_review = summarize_crop_duplicate_review(duplicate_groups)
+    if (
+        config["crop_duplicate_detection"]["require_review_complete_before_store"]
+        and not crop_duplicate_review["review_complete"]
+    ):
+        logger.warning(
+            "重复crop仍有%d个跨标签组未复核；Stage 16中断。请运行：%s",
+            crop_duplicate_review["pending_count"],
+            crop_duplicate_review["tool_command"],
+        )
+        return constants.STAGE_INTERRUPT
+    if (
+        not export_all_crops
+        and crops_storage_config["exclude_predicted_noise"]
+        and not config["lr_prediction"]["sync_to_db"]
+    ):
+        raise ValueError(
+            "store_crops使用crops表中的LR预测字段过滤，"
+            "要求lr_prediction.sync_to_db=true"
+        )
+    if (
+        not export_all_crops
+        and crops_storage_config["exclude_predicted_noise"]
+        and prediction_scope == "active_model"
+    ):
+        resolved_noise_prediction_model = resolve_noise_prediction_model(
+            config,
+            crops_storage_config,
+        )
+        logger.info(
+            "仅使用LR模型%s写入数据库的预测结果。",
+            resolved_noise_prediction_model,
+        )
+    elif not export_all_crops and crops_storage_config["exclude_predicted_noise"]:
+        logger.info(
+            "使用数据库中所有已存LR模型轮次的预测结果；人工ok/纠正标签优先保留。"
+        )
+
     if crops_storage_config["reprocess"]:
         logger.info("crops_storage配置为reprocess=true，将重新裁剪所有入选crop图像")
     else:
         logger.info("crops_storage配置为reprocess=false，将复用已存在的crop图像并只补齐缺失文件")
-            
-        
-
     if crops_storage_config["format"] == "flatten":
         with sqlite3.connect(db_path) as conn:
             metadata_columns = list(crops_storage_config["image_metadata_columns"])
@@ -426,6 +872,9 @@ def main(config: dict | None = None) -> None:
                     c.crop_path,
                     c.noise_review_label,
                     c.manual_corrected_label,
+                    c.noise_predicted_prob,
+                    c.noise_predicted_label,
+                    c.noise_prediction_model,
                     CASE
                         WHEN c.noise_review_label = '{constants.NOISE_REVIEW_LABEL_OK}' THEN 1
                         ELSE 0
@@ -442,7 +891,12 @@ def main(config: dict | None = None) -> None:
             metadata = pd.read_sql_query(crop_sql, conn)
         logger.info("已加载%d条crop及图片元数据，开始应用筛选策略。", len(metadata))
 
-        if crops_storage_config["save_only_manual_reviewed"]:
+        if export_all_crops:
+            logger.info(
+                "crops_storage.selection_mode=all：不按人工复核或LR预测排除任何crop；"
+                "人工纠正标签仍会应用。"
+            )
+        elif crops_storage_config["save_only_manual_reviewed"]:
             logger.info("将仅保存人工审核为ok的crop。")
             metadata = metadata[
                 metadata["noise_review_label"].eq(constants.NOISE_REVIEW_LABEL_OK)
@@ -455,7 +909,7 @@ def main(config: dict | None = None) -> None:
             & (metadata["manual_corrected_label"].astype(str).str.strip() != "")
         )
         
-        if crops_storage_config["exclude_manual_noise"]:
+        if not export_all_crops and crops_storage_config["exclude_manual_noise"]:
             before_count = len(metadata)
             review_label = metadata["noise_review_label"].fillna("").astype(str).str.strip()
             #为选定噪声label的数据
@@ -515,30 +969,65 @@ def main(config: dict | None = None) -> None:
                 "已按唯一反查规则尝试补齐%d条人工纠正样本的operator与submodel/bandai。",
                 int(corrected_mask.sum()),
             )
-        #如果配置了exclude_manual_noise，则在应用人工纠正标签后再过滤一次，去掉LR判定noise的数据。
-        if crops_storage_config["exclude_predicted_noise"]:
-            predictions = load_noise_predictions(config, crops_storage_config)
+        # 应用人工结论后，再按数据库中的LR预测结果过滤未复核样本。
+        if not export_all_crops and crops_storage_config["exclude_predicted_noise"]:
             before_count = len(metadata)
-            corrected_crop_ids = set(metadata.loc[corrected_mask, "crop_id"].astype(int))
-            metadata = metadata.merge(
-                predictions[["crop_id", "noise_predicted_prob", "noise_predicted_label"]],
-                on="crop_id",
-                how="left",
+            predicted_noise_mask = build_db_predicted_noise_mask(
+                metadata,
+                corrected_mask=corrected_mask,
+                crops_storage_config=crops_storage_config,
+                prediction_scope=prediction_scope,
+                active_prediction_model=resolved_noise_prediction_model,
             )
-            predicted_noise_labels = set(crops_storage_config["predicted_noise_labels"])
-            predicted_noise_min_prob = float(crops_storage_config["predicted_noise_min_prob"])
-            predicted_noise_mask = (
-                metadata["noise_predicted_label"].isin(predicted_noise_labels)
-                & (metadata["noise_predicted_prob"].fillna(0.0) >= predicted_noise_min_prob)
-                & ~metadata["crop_id"].astype(int).isin(corrected_crop_ids)
-            )
-            #去掉LR过滤
             metadata = metadata.loc[~predicted_noise_mask].reset_index(drop=True)
             logger.info(
-                "按LR预测过滤crop：过滤%d条，保留%d条。",
+                "按数据库LR预测过滤crop（scope=%s，人工ok/纠正优先）："
+                "过滤%d条，保留%d条。",
+                prediction_scope,
                 before_count - len(metadata),
                 len(metadata),
             )
+        metadata, duplicate_changed_mask, duplicate_apply_summary = (
+            apply_crop_duplicate_resolutions(
+                metadata,
+                duplicate_groups=duplicate_groups,
+                label_column=label_column,
+            )
+        )
+        # Keep this legacy artifact key stable; renaming it would change manifest schema.
+        crop_duplicate_review["stage_14_apply"] = duplicate_apply_summary
+        if duplicate_changed_mask.any():
+            invalidate_columns = list(
+                crops_storage_config["manual_correction_invalidate_metadata_columns"]
+            )
+            metadata = invalidate_metadata_for_manual_corrections(
+                metadata,
+                corrected_mask=duplicate_changed_mask,
+                columns=invalidate_columns,
+                label_column=label_column,
+            )
+            metadata = refill_unique_metadata_for_manual_corrections(
+                metadata,
+                corrected_mask=duplicate_changed_mask,
+                label_column=label_column,
+                operator_columns=list(
+                    crops_storage_config["manual_correction_refill_operator_columns"]
+                ),
+                submodel_bandai_columns=list(
+                    crops_storage_config[
+                        "manual_correction_refill_submodel_bandai_columns"
+                    ]
+                ),
+            )
+        logger.info(
+            "应用重复crop解析：处理groups=%d，移除=%d，整组排除crop=%d，"
+            "label覆盖=%d，保留=%d。",
+            duplicate_apply_summary["resolved_group_count"],
+            duplicate_apply_summary["removed_count"],
+            duplicate_apply_summary["excluded_count"],
+            duplicate_apply_summary["label_override_count"],
+            len(metadata),
+        )
         #按格式变换ASCII label
         metadata = build_en_label(
             metadata,
@@ -632,6 +1121,9 @@ def main(config: dict | None = None) -> None:
             metadata=metadata,
             labels=labels,
             crops_storage_config=crops_storage_config,
+            resolved_noise_prediction_model=resolved_noise_prediction_model,
+            old_noise_recovery_review=old_noise_recovery_review,
+            crop_duplicate_review=crop_duplicate_review,
         )
 
         logger.info("crop图像保存完成，已成功保存%d条crop数据。", len(metadata))

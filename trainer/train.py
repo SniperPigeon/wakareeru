@@ -25,6 +25,8 @@ from trainer.eval import (
 
 logger = utils.get_logger("trainer")
 
+FEATURE_CACHE_FORMAT_VERSION = 2
+
 
 def validate_image_size(image_size: int) -> int:
     image_size = int(image_size)
@@ -164,36 +166,168 @@ def update_latest_trainer_run_pointer(*, run_dir: Path, trainer_cfg: dict[str, A
     logger.info("已更新最新trainer run指针: %s -> %s", pointer_path, run_dir.name)
 
 
-def refresh_feature_cache_labels(
+def normalize_image_paths(paths: list[Any]) -> list[str]:
+    return [str(path).replace("\\", "/") for path in paths]
+
+
+def validate_feature_cache_compatibility(
     *,
     cache: dict[str, Any],
-    train_df: pd.DataFrame,
-    val_df: pd.DataFrame,
     trainer_cfg: dict[str, Any],
+    model: BackboneLinearClassifier,
 ) -> None:
-    label_id_column = trainer_cfg["label_id_column"]
-    for split, split_df in (("train", train_df), ("val", val_df)):
-        current_labels = torch.tensor(
-            split_df[label_id_column].astype(int).to_numpy(),
-            dtype=torch.long,
-        )
-        cached_labels = cache[split]["labels"].long()
-        if cached_labels.shape != current_labels.shape:
+    compatibility_fields = (
+        ("backbone_model_name", trainer_cfg["backbone_model_name"]),
+        ("feature_pooling", model.feature_pooling),
+        ("feature_dim", model.feature_dim),
+        ("image_size", int(trainer_cfg["image_size"])),
+    )
+    for field, current_value in compatibility_fields:
+        if field not in cache:
             raise ValueError(
-                "linear head特征缓存的label数量与当前metadata不一致，"
+                f"linear head特征缓存缺少{field}元数据，"
                 "请设置feature_cache_rebuild=true后重建。"
             )
-        if not torch.equal(cached_labels, current_labels):
-            changed_count = int(cached_labels.ne(current_labels).sum().item())
-            logger.info(
-                "刷新linear head特征缓存%s labels：%d/%d个label_id发生变化。",
-                split,
-                changed_count,
-                int(current_labels.numel()),
+        cached_value = cache[field]
+        if field in {"feature_dim", "image_size"}:
+            cached_value = int(cached_value)
+        if cached_value != current_value:
+            raise ValueError(
+                f"linear head特征缓存的{field}与当前配置不一致，"
+                "请设置feature_cache_rebuild=true后重建。"
             )
-            cache[split]["labels"] = current_labels
-        else:
-            cache[split]["labels"] = cached_labels
+
+
+def validate_feature_bank(
+    *,
+    feature_bank: dict[str, Any],
+    feature_dim: int,
+) -> None:
+    features = feature_bank["features"]
+    image_paths = normalize_image_paths(feature_bank["image_paths"])
+    if features.ndim != 2 or features.shape[1] != feature_dim:
+        raise ValueError(
+            "linear head特征缓存维度错误: "
+            f"shape={tuple(features.shape)}, feature_dim={feature_dim}。"
+            "请删除缓存或设置feature_cache_rebuild=true后重建。"
+        )
+    if features.shape[0] != len(image_paths):
+        raise ValueError(
+            "linear head特征缓存的feature数量与image_path数量不一致，"
+            "请删除缓存或设置feature_cache_rebuild=true后重建。"
+        )
+    if len(image_paths) != len(set(image_paths)):
+        raise ValueError(
+            "linear head特征缓存包含重复image_path，"
+            "请删除缓存或设置feature_cache_rebuild=true后重建。"
+        )
+    if not torch.isfinite(features).all():
+        nan_count = int(torch.isnan(features).sum().item())
+        inf_count = int(torch.isinf(features).sum().item())
+        raise ValueError(
+            "linear head特征缓存包含非有限feature: "
+            f"nan={nan_count}, inf={inf_count}。"
+            "请删除缓存或设置feature_cache_rebuild=true后重建。"
+        )
+    feature_bank["image_paths"] = image_paths
+
+
+def load_feature_bank(
+    *,
+    cache: dict[str, Any],
+    feature_dim: int,
+) -> tuple[dict[str, Any], bool]:
+    cache_format_version = cache.get("cache_format_version")
+    if cache_format_version == FEATURE_CACHE_FORMAT_VERSION:
+        feature_bank = cache["feature_bank"]
+        validate_feature_bank(feature_bank=feature_bank, feature_dim=feature_dim)
+        return feature_bank, False
+
+    if cache_format_version is not None:
+        raise ValueError(
+            f"不支持的linear head特征缓存格式版本: {cache_format_version!r}，"
+            "请设置feature_cache_rebuild=true后重建。"
+        )
+
+    if not {"train", "val"}.issubset(cache):
+        raise ValueError(
+            "无法识别linear head特征缓存结构，"
+            "请设置feature_cache_rebuild=true后重建。"
+        )
+    feature_bank = {
+        "features": torch.cat(
+            (cache["train"]["features"], cache["val"]["features"]),
+            dim=0,
+        ),
+        "image_paths": (
+            list(cache["train"]["image_paths"])
+            + list(cache["val"]["image_paths"])
+        ),
+    }
+    validate_feature_bank(feature_bank=feature_bank, feature_dim=feature_dim)
+    logger.info("将旧版train/val整表特征缓存迁移为按image_path索引的增量缓存。")
+    return feature_bank, True
+
+
+def build_feature_table(
+    *,
+    feature_bank: dict[str, Any],
+    metadata: pd.DataFrame,
+    trainer_cfg: dict[str, Any],
+) -> dict[str, Any]:
+    image_paths = normalize_image_paths(
+        metadata[trainer_cfg["image_path_column"]].tolist()
+    )
+    feature_indices_by_path = {
+        image_path: index
+        for index, image_path in enumerate(feature_bank["image_paths"])
+    }
+    missing_paths = [
+        image_path
+        for image_path in image_paths
+        if image_path not in feature_indices_by_path
+    ]
+    if missing_paths:
+        raise ValueError(
+            "linear head特征缓存缺少当前metadata样本: "
+            f"{missing_paths[:5]}"
+        )
+    feature_indices = torch.tensor(
+        [feature_indices_by_path[image_path] for image_path in image_paths],
+        dtype=torch.long,
+    )
+    return {
+        "features": feature_bank["features"].index_select(0, feature_indices),
+        "labels": torch.tensor(
+            metadata[trainer_cfg["label_id_column"]].astype(int).to_numpy(),
+            dtype=torch.long,
+        ),
+        "sample_indices": torch.arange(len(metadata), dtype=torch.long),
+        "image_paths": image_paths,
+    }
+
+
+def save_feature_bank_cache(
+    *,
+    feature_cache_path: Path,
+    feature_bank: dict[str, Any],
+    trainer_cfg: dict[str, Any],
+    model: BackboneLinearClassifier,
+    created_at: str,
+) -> None:
+    cache = {
+        "cache_format_version": FEATURE_CACHE_FORMAT_VERSION,
+        "created_at": created_at,
+        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
+        "backbone_model_name": trainer_cfg["backbone_model_name"],
+        "feature_pooling": model.feature_pooling,
+        "feature_dim": model.feature_dim,
+        "image_size": int(trainer_cfg["image_size"]),
+        "feature_bank": feature_bank,
+    }
+    temporary_path = feature_cache_path.with_name(feature_cache_path.name + ".tmp")
+    torch.save(cache, temporary_path)
+    temporary_path.replace(feature_cache_path)
 
 
 @torch.inference_mode()
@@ -249,101 +383,116 @@ def load_or_create_feature_cache(
         trainer_cfg=trainer_cfg,
         feature_cache_file_name=phase_cfg["feature_cache_file_name"],
     )
+    feature_cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_changed = False
+    cache_created_at = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime())
     if feature_cache_path.exists() and not bool(phase_cfg["feature_cache_rebuild"]):
         logger.info("加载linear head特征缓存: %s", feature_cache_path)
         cache = torch.load(feature_cache_path, map_location="cpu", weights_only=False)
-        if cache["backbone_model_name"] != trainer_cfg["backbone_model_name"]:
-            raise ValueError(
-                "linear head特征缓存的backbone_model_name与当前配置不一致，"
-                "请设置feature_cache_rebuild=true后重建。"
-            )
-        if cache.get("feature_pooling") != model.feature_pooling:
-            raise ValueError(
-                "linear head特征缓存的feature_pooling与当前模型不一致，"
-                "请设置feature_cache_rebuild=true后重建。"
-            )
-        if int(cache.get("feature_dim", -1)) != model.feature_dim:
-            raise ValueError(
-                "linear head特征缓存的feature_dim与当前模型不一致，"
-                "请设置feature_cache_rebuild=true后重建。"
-            )
-        if "image_size" not in cache:
-            raise ValueError(
-                "linear head特征缓存缺少image_size元数据，"
-                "请设置feature_cache_rebuild=true后重建。"
-            )
-        if int(cache["image_size"]) != int(trainer_cfg["image_size"]):
-            raise ValueError(
-                "linear head特征缓存的image_size与当前配置不一致，"
-                "请设置feature_cache_rebuild=true后重建。"
-            )
-        if len(cache["train"]["labels"]) != len(train_df) or len(cache["val"]["labels"]) != len(val_df):
-            raise ValueError(
-                "linear head特征缓存样本数与当前train/val切分不一致，"
-                "请设置feature_cache_rebuild=true后重建。"
-            )
-        image_path_column = trainer_cfg["image_path_column"]
-        train_paths = [str(path).replace("\\", "/") for path in train_df[image_path_column].tolist()]
-        val_paths = [str(path).replace("\\", "/") for path in val_df[image_path_column].tolist()]
-        if cache["train"]["image_paths"] != train_paths or cache["val"]["image_paths"] != val_paths:
-            raise ValueError(
-                "linear head特征缓存的image_path顺序与当前train/val切分不一致，"
-                "请设置feature_cache_rebuild=true后重建。"
-            )
-        refresh_feature_cache_labels(
+        validate_feature_cache_compatibility(
             cache=cache,
-            train_df=train_df,
-            val_df=val_df,
             trainer_cfg=trainer_cfg,
+            model=model,
         )
-        validate_feature_cache(cache)
-        return cache
+        cache_created_at = str(cache.get("created_at", cache_created_at))
+        feature_bank, cache_changed = load_feature_bank(
+            cache=cache,
+            feature_dim=model.feature_dim,
+        )
+    else:
+        if feature_cache_path.exists():
+            logger.info("按配置重建linear head特征缓存: %s", feature_cache_path)
+        else:
+            logger.info("开始生成linear head特征缓存: %s", feature_cache_path)
+        feature_bank = {
+            "features": torch.empty((0, model.feature_dim), dtype=torch.float32),
+            "image_paths": [],
+        }
+        cache_changed = True
 
-    logger.info("开始生成linear head特征缓存: %s", feature_cache_path)
-    feature_cache_path.parent.mkdir(parents=True, exist_ok=True)
-    train_feature_loader = make_dataloader(
-        metadata=train_df,
-        dataset_root=dataset_root,
-        processor=processor,
-        trainer_cfg=trainer_cfg,
-        train=False,
+    image_path_column = trainer_cfg["image_path_column"]
+    current_metadata = pd.concat((train_df, val_df), ignore_index=True)
+    current_metadata = current_metadata.copy()
+    current_metadata[image_path_column] = normalize_image_paths(
+        current_metadata[image_path_column].tolist()
     )
-    val_feature_loader = make_dataloader(
-        metadata=val_df,
-        dataset_root=dataset_root,
-        processor=processor,
-        trainer_cfg=trainer_cfg,
-        train=False,
-    )
-    model.train_linear_head_only()
-    model.to(device)
-    cache = {
-        "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
-        "backbone_model_name": trainer_cfg["backbone_model_name"],
-        "feature_pooling": model.feature_pooling,
+    current_metadata = current_metadata.drop_duplicates(
+        subset=[image_path_column],
+        keep="first",
+    ).reset_index(drop=True)
+    cached_paths = set(feature_bank["image_paths"])
+    missing_metadata = current_metadata.loc[
+        ~current_metadata[image_path_column].isin(cached_paths)
+    ].reset_index(drop=True)
+
+    if not missing_metadata.empty:
+        logger.info(
+            "linear head特征缓存命中%d/%d个当前唯一样本，仅提取%d个新增样本。",
+            len(current_metadata) - len(missing_metadata),
+            len(current_metadata),
+            len(missing_metadata),
+        )
+        missing_feature_loader = make_dataloader(
+            metadata=missing_metadata,
+            dataset_root=dataset_root,
+            processor=processor,
+            trainer_cfg=trainer_cfg,
+            train=False,
+        )
+        model.train_linear_head_only()
+        model.to(device)
+        extracted = extract_feature_table(
+            model=model,
+            dataloader=missing_feature_loader,
+            device=device,
+            amp_enabled=bool(phase_cfg["feature_cache_amp_enabled"]) and amp_enabled,
+            amp_dtype=amp_dtype,
+        )
+        expected_paths = missing_metadata[image_path_column].tolist()
+        if extracted["image_paths"] != expected_paths:
+            raise ValueError("linear head新增特征的image_path顺序与metadata不一致")
+        feature_bank["features"] = torch.cat(
+            (feature_bank["features"], extracted["features"]),
+            dim=0,
+        )
+        feature_bank["image_paths"].extend(extracted["image_paths"])
+        cache_changed = True
+    else:
+        logger.info(
+            "linear head特征缓存命中全部%d个当前唯一样本，无需运行backbone。",
+            len(current_metadata),
+        )
+
+    validate_feature_bank(feature_bank=feature_bank, feature_dim=model.feature_dim)
+    if cache_changed:
+        save_feature_bank_cache(
+            feature_cache_path=feature_cache_path,
+            feature_bank=feature_bank,
+            trainer_cfg=trainer_cfg,
+            model=model,
+            created_at=cache_created_at,
+        )
+        logger.info(
+            "linear head增量特征缓存已保存: %s（累计%d个样本）",
+            feature_cache_path,
+            len(feature_bank["image_paths"]),
+        )
+
+    runtime_cache = {
         "feature_dim": model.feature_dim,
-        "image_size": int(trainer_cfg["image_size"]),
-        "train_sample_count": int(len(train_df)),
-        "val_sample_count": int(len(val_df)),
-        "train": extract_feature_table(
-            model=model,
-            dataloader=train_feature_loader,
-            device=device,
-            amp_enabled=bool(phase_cfg["feature_cache_amp_enabled"]) and amp_enabled,
-            amp_dtype=amp_dtype,
+        "train": build_feature_table(
+            feature_bank=feature_bank,
+            metadata=train_df,
+            trainer_cfg=trainer_cfg,
         ),
-        "val": extract_feature_table(
-            model=model,
-            dataloader=val_feature_loader,
-            device=device,
-            amp_enabled=bool(phase_cfg["feature_cache_amp_enabled"]) and amp_enabled,
-            amp_dtype=amp_dtype,
+        "val": build_feature_table(
+            feature_bank=feature_bank,
+            metadata=val_df,
+            trainer_cfg=trainer_cfg,
         ),
     }
-    validate_feature_cache(cache)
-    torch.save(cache, feature_cache_path)
-    logger.info("linear head特征缓存已保存: %s", feature_cache_path)
-    return cache
+    validate_feature_cache(runtime_cache)
+    return runtime_cache
 
 
 def validate_feature_cache(cache: dict[str, Any]) -> None:
@@ -351,6 +500,8 @@ def validate_feature_cache(cache: dict[str, Any]) -> None:
     for split in ("train", "val"):
         features = cache[split]["features"]
         labels = cache[split]["labels"]
+        sample_indices = cache[split]["sample_indices"]
+        image_paths = cache[split]["image_paths"]
         if features.ndim != 2 or features.shape[1] != feature_dim:
             raise ValueError(
                 f"linear head特征缓存维度错误: split={split}, "
@@ -363,6 +514,16 @@ def validate_feature_cache(cache: dict[str, Any]) -> None:
             raise ValueError(
                 f"linear head特征缓存包含非有限feature: split={split}, "
                 f"nan={nan_count}, inf={inf_count}。请删除缓存或设置feature_cache_rebuild=true后重建。"
+            )
+        if not (
+            features.shape[0]
+            == labels.numel()
+            == sample_indices.numel()
+            == len(image_paths)
+        ):
+            raise ValueError(
+                f"linear head特征缓存字段长度不一致: split={split}。"
+                "请删除缓存或设置feature_cache_rebuild=true后重建。"
             )
         if labels.numel() == 0:
             raise ValueError(f"linear head特征缓存为空: split={split}")

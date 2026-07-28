@@ -7,7 +7,7 @@ PIPELINE_DIR = Path(__file__).resolve().parents[1] / "pipeline"
 if str(PIPELINE_DIR) not in sys.path:
     sys.path.insert(0, str(PIPELINE_DIR))
 
-from pipeline import stage_13b_label_metadata_translation as stage_13b  # noqa: E402
+from pipeline import stage_14_label_metadata_translation as stage_14  # noqa: E402
 
 
 def test_observed_operators_are_grouped_by_effective_label() -> None:
@@ -27,7 +27,7 @@ def test_observed_operators_are_grouped_by_effective_label() -> None:
         "JR Central": ("JR東海", "JR东海"),
     }
 
-    lookup = stage_13b.build_observed_operator_lookup(candidates, translations)
+    lookup = stage_14.build_observed_operator_lookup(candidates, translations)
 
     assert lookup["117系"] == {
         "ja": ["JR東海", "JR西日本"],
@@ -49,7 +49,7 @@ def test_canonical_pair_rejects_mismatched_stage_06_japanese_name() -> None:
         ]
     )
 
-    lookup = stage_13b.build_observed_operator_lookup(
+    lookup = stage_14.build_observed_operator_lookup(
         candidates,
         {"JR West": ("JR西日本", "JR西日本")},
     )
@@ -72,7 +72,7 @@ def test_unknown_operator_keeps_blank_chinese_review_slot() -> None:
         ]
     )
 
-    lookup = stage_13b.build_observed_operator_lookup(candidates, {})
+    lookup = stage_14.build_observed_operator_lookup(candidates, {})
 
     assert lookup["新形式"] == {
         "ja": ["新鉄道"],
