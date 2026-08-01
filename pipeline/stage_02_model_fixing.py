@@ -170,6 +170,79 @@ def _parse_manual_mapping(value) -> dict:
     return parsed
 
 
+def _fixed_commons_result(row: pd.Series) -> dict | None:
+    """Return a catalog-provided root without running Commons discovery."""
+    root = _manual_value(row.get("commons_root_category"))
+    if not root:
+        return None
+
+    operator_roots = {operator: root for operator in row["operator_en"]}
+    return {
+        "commons_prefix": root,
+        "commons_root_category": root,
+        "commons_root_decision": "人工车型目录指定",
+        "commons_operator_roots": operator_roots,
+        "commons_candidates": [],
+        "needs_review": False,
+    }
+
+
+def _merge_unique_values(values) -> list:
+    merged = []
+    for value in values:
+        for item in value if isinstance(value, list) else []:
+            if item not in merged:
+                merged.append(item)
+    return merged
+
+
+def consolidate_series_roots(df: pd.DataFrame) -> pd.DataFrame:
+    """Merge aliases/operators that resolve to the same canonical series and root."""
+    if df.empty:
+        return df
+
+    consolidated = []
+    for _, group in df.groupby(
+        ["series", "commons_root_category"],
+        sort=False,
+        dropna=False,
+    ):
+        base = group.iloc[0].copy()
+        for col in ["operator_page_title", "operator_jp", "operator_en"]:
+            base[col] = _merge_unique_values(group[col])
+
+        operator_roots = {}
+        for value in group["commons_operator_roots"]:
+            if isinstance(value, dict):
+                operator_roots.update(value)
+            elif _manual_value(value):
+                operator_roots.update(_parse_manual_mapping(value))
+        base["commons_operator_roots"] = operator_roots
+
+        candidates = []
+        for value in group["commons_candidates"]:
+            parsed = value
+            if not isinstance(parsed, list) and _manual_value(parsed):
+                parsed = _parse_manual_literal(str(parsed))
+            if isinstance(parsed, list):
+                for candidate in parsed:
+                    if candidate not in candidates:
+                        candidates.append(candidate)
+        base["commons_candidates"] = candidates
+        base["needs_review"] = bool(group["needs_review"].all())
+        decisions = [
+            decision
+            for decision in dict.fromkeys(
+                _manual_value(value) for value in group["commons_root_decision"]
+            )
+            if decision
+        ]
+        base["commons_root_decision"] = "；".join(decisions)
+        consolidated.append(base)
+
+    return pd.DataFrame(consolidated).reset_index(drop=True)
+
+
 def drop_internal_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df.drop(
         columns=[MANUAL_SOURCE_SERIES_COL, MANUAL_SOURCE_WIKI_TITLE_COL],
@@ -609,7 +682,9 @@ def main(config=None):
     config = config or utils.load_pipeline_config()
     utils.init_db(config=config)
 
-    manual_overrides = load_manual_overrides(config["path"].get("manual_series_overrides_path"))
+    manual_overrides = load_manual_overrides(
+        config["path"]["manual_series_overrides_path"]
+    )
     series_commons_path = utils.join_data_root(config["path"]["series_commons_path"], config=config)
     commons_cache = _load_commons_cache(series_commons_path)
     empty_cached_roots = find_empty_cached_roots(commons_cache)
@@ -638,25 +713,33 @@ def main(config=None):
     root_rows = []
     fetched_count = 0
     cached_count = 0
+    fixed_count = 0
     for _, row in all_model.iterrows():
         manual = _manual_for_row(row, manual_overrides)
-        cached = _cached_commons_result(
-            row,
-            commons_cache,
-            empty_cached_roots=empty_cached_roots,
-        )
-        should_fetch = manual is not None or cached is None
+        fixed = _fixed_commons_result(row)
+        resolved_online = False
+        if fixed is not None:
+            result = fixed
+            fixed_count += 1
+        else:
+            cached = _cached_commons_result(
+                row,
+                commons_cache,
+                empty_cached_roots=empty_cached_roots,
+            )
+            should_fetch = manual is not None or cached is None
 
-        if should_fetch:
-            result = find_commons_root(row, manual_overrides=manual_overrides)
-            fetched_count += 1
-        elif cached is not None:
-            result = cached
-            cached_count += 1
+            if should_fetch:
+                result = find_commons_root(row, manual_overrides=manual_overrides)
+                fetched_count += 1
+                resolved_online = True
+            elif cached is not None:
+                result = cached
+                cached_count += 1
 
         root_rows.append(result)
         status = "待确认" if result["needs_review"] else "通过"
-        if should_fetch:
+        if fixed is not None or resolved_online:
             logger.info(
                 '%s %s (%s) -> "%s" [%s]',
                 status,
@@ -672,13 +755,18 @@ def main(config=None):
 
     all_model = apply_manual_output(all_model, manual_overrides)
     all_model = drop_internal_columns(all_model)
+    before_consolidation = len(all_model)
+    all_model = consolidate_series_roots(all_model)
 
     review_count = int(all_model["needs_review"].sum())
     logger.info(
-        "Commons 车型映射共 %d 行；联网验证 %d 行；复用缓存 %d 行；待人工确认 %d 行",
+        "Commons 车型映射共 %d 行；人工 root %d 行；联网验证 %d 行；"
+        "复用缓存 %d 行；合并同 series/root %d 行；待人工确认 %d 行",
         len(all_model),
+        fixed_count,
         fetched_count,
         cached_count,
+        before_consolidation - len(all_model),
         review_count,
     )
 

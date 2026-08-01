@@ -50,6 +50,7 @@ pipeline/                  # 主数据管线；编号 stage 可独立运行
   utils.py                 # 路径、DB、配置、日志等辅助函数
 config/
   pipeline_config.yaml     # 路径、模型名、阈值、抓取范围等运行配置
+  manual_series_catalog.csv # 私铁/第三部门人工车型与 Commons root 快捷目录
   manual_series_overrides.csv
   schema.sql               # 新数据库的基线 schema
   migrations/              # 既有数据库的增量迁移，按数字顺序执行
@@ -205,8 +206,8 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 
 | Key | Script | 作用 |
 | --- | --- | --- |
-| `model_parsing` | `stage_01_model_parsing.py` | 从 Wikipedia wikitext 解析车辆系列 CSV，并排除 `導入予定` 等不纳入数据集的状态；人工确认的系列例外保留 |
-| `model_fixing` | `stage_02_model_fixing.py` | 应用人工修正，生成 Commons 根分类映射；候选与缓存 root 会用 Commons `categoryinfo` 检查是否含文件或子分类，空 root 失效后重新匹配；其余有效旧映射按 key 复用，新 key 与历史未联网占位记录会联网补查 |
+| `model_parsing` | `stage_01_model_parsing.py` | 从 Wikipedia wikitext 解析车辆系列 CSV，并排除 `導入予定` 等不纳入数据集的状态；随后追加 `manual_series_catalog.csv` 中显式登记的私铁/第三部门抓取入口 |
+| `model_fixing` | `stage_02_model_fixing.py` | 应用人工修正，生成 Commons 根分类映射；人工车型目录所填 root 直接采用；相同规范 series/root 的别名来源合并 operator，不同 root 保留为多个抓取入口；其余候选与缓存 root 会用 Commons `categoryinfo` 检查是否含文件或子分类 |
 | `manifest_crawling` | `stage_03_manifest_crawling.py` | 查询 Commons 分类树，写入 `categories` 与 `images`；按车型、根分类、category 和已覆盖递归深度记录完整子树 checkpoint，重跑时跳过已完成子树；MIME 过滤只清理本次增量抓取的记录 |
 | `img_crawling` | `stage_04_img_crawler.py` | 下载图片，更新 `images.download_status`，并将图片文件名与 `images.downloaded_path` 规范化为 Unicode NFC；macOS/APFS 上 NFC/NFD 指向同一 inode 时跳过文件重命名，仅将其视为路径别名 |
 | `siglip_filter` | `stage_05_siglip_image_filtering.py` | 用 SigLIP2 过滤内饰、局部细节等不适合训练的图片 |
@@ -229,6 +230,8 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 `stage_01` 从日文 Wikipedia 车辆列表解析 `series`、`wiki_title`、`full_name`、`status`、`type`、`subtype`、`operator_jp`、`operator_en` 等字段。
 
 `stage_02` 使用 `config/manual_series_overrides.csv` 处理 Commons 命名差异、系列合并和人工修正。与 Commons 分类名相关的规则集中在 `pipeline/constants.py` 和 stage 脚本中；需要修改时先读现有逻辑，不要只凭文件名字符串硬编码。
+
+私铁与第三部门可通过 `config/manual_series_catalog.csv` 同时绕过运营公司车型列表解析和 Commons root 自动搜索。`source_series` 保留来源名/别名，`series` 是下游规范标签；`entry_kind=new` 用于新车型，`merge` 用于别名同车或沿用已有 JR 车型。车辆谱系相同的第三部门版本即使视觉差异明显，也必须先 merge 到 JR 基础 `series`，只允许在 Stage 08 根据 operator、submodel、番台或特殊涂装 metadata 拆成 `fine_grained_series`；只有实际无谱系关系的同名异车才为基础 `series` 添加运营公司限定。完整规则见 `docs/manual_series_catalog.md`。
 
 `fine_grained_series` 用于更细粒度的训练标签；规则来源见 `config/manual_fine_grained_series.csv` 和 `fine_grain_series.rules_path` 配置。DINOv3 特征缓存只绑定 crop 图像和 `crop_id`，修改细粒度标签规则后通常只需重跑 `fine_grain_series`、`loss_tracking` 与后续噪声分析阶段，不需要重跑 `feature_extraction`。
 
@@ -259,7 +262,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 ## 配置要点
 
 - `path.in_project_root` 与 `path.data_root` 控制生成数据根目录；`in_project_root: true` 时 `data_root` 相对项目根目录解析，`false` 时 `data_root` 必须是绝对路径，适合 RunPod volume 挂载。
-- `path.db_path`、`path.raw_img_dir`、`path.cache_dir`、`path.model_dir`、CSV、review 输出和 checkpoint 路径相对 `path.data_root` 解析；`manual_series_overrides_path`、`fine_grain_series.rules_path` 等代码/配置文件仍相对项目根目录解析。
+- `path.db_path`、`path.raw_img_dir`、`path.cache_dir`、`path.model_dir`、CSV、review 输出和 checkpoint 路径相对 `path.data_root` 解析；`manual_series_catalog_path`、`manual_series_overrides_path`、`fine_grain_series.rules_path` 等代码/配置文件仍相对项目根目录解析。
 - `crawler.active_operators` 控制当前纳入的数据范围。
 - `crawler.manifest_max_depth`、`manifest_max_files_per_category` 控制 Commons 分类递归与每分类文件上限；`crawler.manifest_reprocess` 控制是否忽略 category checkpoint 并覆盖重爬 manifest。
 - `image_filtering.*` 控制 SigLIP2 图片过滤。

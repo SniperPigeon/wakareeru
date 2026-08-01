@@ -1,0 +1,13 @@
+source_series,series,entry_kind,wiki_title,full_name,status,type,subtype,operator_jp,operator_en,commons_root_category
+HOT3500形,HOT3500形,new,智頭急行HOT3500形気動車,智頭急行HOT3500形気動車,現役,気動車,一般形,智頭急行,Chizu Express,Chizu Express HOT 3500 series
+HOT7000系,HOT7000系,new,智頭急行HOT7000系気動車,智頭急行HOT7000系気動車,現役,気動車,特急形,智頭急行,Chizu Express,Chizu Express HOT 7000 series
+KTR001形,KTR001形,new,北近畿タンゴ鉄道KTR001形気動車,北近畿タンゴ鉄道KTR001形気動車,廃止,気動車,特急形,京都丹後鉄道,Kyoto Tango Railway,Kitakinki Tango Railway KTR 001
+MF100・200形,MF100・200形,new,宮福鉄道MF100形気動車,宮福鉄道MF100・MF200形気動車,現役,気動車,一般形,京都丹後鉄道,Kyoto Tango Railway,Miyafuku Railway MF100/200
+KTR300形,KTR300形,new,北近畿タンゴ鉄道KTR300形気動車,北近畿タンゴ鉄道KTR300形気動車,現役,気動車,一般形,京都丹後鉄道,Kyoto Tango Railway,Kitakinki Tango Railway KTR 300
+KTR700・800形,KTR700・800形,new,北近畿タンゴ鉄道KTR700形気動車,北近畿タンゴ鉄道KTR700・KTR800形気動車,現役,気動車,一般形,京都丹後鉄道,Kyoto Tango Railway,Kitakinki Tango Railway KTR 700/800
+KTR8000形,KTR8000形,new,北近畿タンゴ鉄道KTR8000形気動車,北近畿タンゴ鉄道KTR8000形気動車,現役,気動車,特急形,京都丹後鉄道,Kyoto Tango Railway,Kitakinki Tango Railway KTR 8000
+KTR8500形,キハ85系,merge,JR東海キハ85系気動車#北近畿タンゴ鉄道KTR8500形,京都丹後鉄道KTR8500形気動車,現役,気動車,特急形,京都丹後鉄道,Kyoto Tango Railway,Kitakinki Tango Railway KTR 8500
+ET122形,キハ122系,merge,えちごトキめき鉄道ET122形気動車,えちごトキめき鉄道ET122形気動車,現役,気動車,一般形,えちごトキめき鉄道,Echigo Tokimeki Railway,ET122
+ET127系,E127系,merge,JR東日本E127系電車#えちごトキめき鉄道ET127系,えちごトキめき鉄道ET127系電車,現役,電車,通勤形,えちごトキめき鉄道,Echigo Tokimeki Railway,ET127
+413・455系,455系,merge,国鉄413系・717系電車#えちごトキめき鉄道,えちごトキめき鉄道413系・455系電車,現役,電車,急行形,えちごトキめき鉄道,Echigo Tokimeki Railway,JNR 413 (Echigo Tokimeki Railway)
+HK100形,HK100形,new,北越急行HK100形電車,北越急行HK100形電車,現役,電車,近郊形,北越急行,Hokuetsu Express,Hokuetsu Express 100 series
