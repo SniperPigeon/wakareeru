@@ -37,6 +37,14 @@ COMMONS_COLUMNS = [
     "needs_review",
     "commons_operator_roots",
 ]
+LLM_DETAIL_COLUMNS = [
+    "submodel",
+    "bandai",
+    "operator_en",
+    "operator_jp",
+    "special_formation",
+    "special_livery",
+]
 MISSING_CACHE_DECISION = "增量模式未联网补查，且缺少 Commons 缓存"
 
 
@@ -196,6 +204,34 @@ def _merge_unique_values(values) -> list:
     return merged
 
 
+def build_manual_metadata_json(row: pd.Series) -> str:
+    """Serialize non-empty Stage 06 metadata supplied by a manual catalog row."""
+    if _manual_value(row.get("entry_kind")) not in {"new", "merge"}:
+        return "{}"
+
+    metadata = {}
+    for col in LLM_DETAIL_COLUMNS:
+        value = row.get(col)
+        if isinstance(value, list):
+            cleaned = [_manual_value(item) for item in value if _manual_value(item)]
+            if len(cleaned) > 1:
+                # Keep multi-operator provenance in the list columns, but do not
+                # collapse it into a scalar Stage 06 lock.
+                continue
+            value = cleaned[0] if cleaned else ""
+        value = _manual_value(value)
+        if value:
+            metadata[col] = value
+    return json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+
+
+def add_manual_metadata_json(df: pd.DataFrame) -> pd.DataFrame:
+    """Attach per-row manual metadata before same-series/root consolidation."""
+    df = df.copy()
+    df["manual_metadata_json"] = df.apply(build_manual_metadata_json, axis=1)
+    return df
+
+
 def consolidate_series_roots(df: pd.DataFrame) -> pd.DataFrame:
     """Merge aliases/operators that resolve to the same canonical series and root."""
     if df.empty:
@@ -238,6 +274,24 @@ def consolidate_series_roots(df: pd.DataFrame) -> pd.DataFrame:
             if decision
         ]
         base["commons_root_decision"] = "；".join(decisions)
+        manual_metadata = {}
+        manual_values = (
+            group["manual_metadata_json"]
+            if "manual_metadata_json" in group
+            else pd.Series(["{}"] * len(group), index=group.index)
+        )
+        for value in manual_values:
+            parsed = json.loads(value) if _manual_value(value) else {}
+            for key, item in parsed.items():
+                if key in manual_metadata and manual_metadata[key] != item:
+                    raise ValueError(
+                        f"同一 series/root 的人工 metadata 冲突：{key}="
+                        f"{manual_metadata[key]!r} / {item!r}"
+                    )
+                manual_metadata[key] = item
+        base["manual_metadata_json"] = json.dumps(
+            manual_metadata, ensure_ascii=False, sort_keys=True
+        )
         consolidated.append(base)
 
     return pd.DataFrame(consolidated).reset_index(drop=True)
@@ -755,6 +809,7 @@ def main(config=None):
 
     all_model = apply_manual_output(all_model, manual_overrides)
     all_model = drop_internal_columns(all_model)
+    all_model = add_manual_metadata_json(all_model)
     before_consolidation = len(all_model)
     all_model = consolidate_series_roots(all_model)
 

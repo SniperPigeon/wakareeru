@@ -23,6 +23,12 @@ MANUAL_SERIES_REQUIRED_COLUMNS = {
     "operator_en",
     "commons_root_category",
 }
+MANUAL_SERIES_OPTIONAL_METADATA_COLUMNS = [
+    "submodel",
+    "bandai",
+    "special_formation",
+    "special_livery",
+]
 
 
 def fetch_wikitext(page_title: str) -> str:
@@ -228,10 +234,15 @@ def load_manual_series_catalog(path: str | os.PathLike) -> pd.DataFrame:
                 "operator_jp",
                 "operator_en",
                 "commons_root_category",
+                *MANUAL_SERIES_OPTIONAL_METADATA_COLUMNS,
             ]
         )
 
     catalog = catalog.copy()
+    for col in MANUAL_SERIES_OPTIONAL_METADATA_COLUMNS:
+        if col not in catalog:
+            catalog[col] = ""
+        catalog[col] = catalog[col].fillna("").astype(str).str.strip()
     for col in MANUAL_SERIES_REQUIRED_COLUMNS:
         catalog[col] = catalog[col].str.strip()
     catalog["operator_page_title"] = pd.Series(
@@ -304,6 +315,7 @@ def load_manual_series_catalog(path: str | os.PathLike) -> pd.DataFrame:
             "operator_jp",
             "operator_en",
             "commons_root_category",
+            *MANUAL_SERIES_OPTIONAL_METADATA_COLUMNS,
         ]
     ]
 
