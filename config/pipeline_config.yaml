@@ -10,6 +10,7 @@ path:
   series_list_path: 'jr_honshu_freight_series.csv'
   series_commons_path: 'jr_honshu_series_wiki_commons.csv'
   commons_review_path: 'review/commons_root_review.csv'
+  manual_series_catalog_path: 'config/manual_series_catalog.csv'
   manual_series_overrides_path: 'config/manual_series_overrides.csv'
   img_crawl_log_path: 'img_crawl_checkpoint.csv'
   llm_category_details_path: 'llm_category_details.csv'
@@ -42,10 +43,79 @@ crawler:
   
   download_max_retries: 3
 
-  # Target only the two series whose Commons roots were corrected in this pass.
+  # Target the manually catalogued third-sector and subway additions.
+  # Merge entries use their canonical base series here; Stage 03 still crawls
+  # each distinct Commons root emitted by Stage 02.
   series_test_scope:
-    - 285系
-    - キハ185系
+    - HOT3500形
+    - HOT7000系
+    - KTR001形
+    - MF100・200形
+    - KTR300形
+    - KTR700・800形
+    - KTR8000形
+    - キハ122系
+    - E127系
+    - HK100形
+    - HSOR-100形
+    - TKT-8000形
+    - 9640形
+    - 6000形
+    - 7000形
+    - 8000形
+    - 36-100形
+    - 36-R形
+    - 36-700形
+    - 701系
+    - E721系
+    - 東京メトロ01系
+    - 東京メトロ02系
+    - 東京メトロ03系
+    - 東京メトロ05系
+    - 東京メトロ06系
+    - 東京メトロ07系
+    - 東京メトロ08系
+    - 東京メトロ1000系
+    - 東京メトロ2000系
+    - 東京メトロ5000系
+    - 東京メトロ6000系
+    - 東京メトロ7000系
+    - 東京メトロ8000系
+    - 東京メトロ9000系
+    - 東京メトロ10000系
+    - 東京メトロ13000系
+    - 東京メトロ15000系
+    - 東京メトロ16000系
+    - 東京メトロ17000系
+    - 東京メトロ18000系
+    - 都営5000形
+    - 都営5200形
+    - 都営5300形
+    - 都営5500形
+    - 都営6000形
+    - 都営6300形
+    - 都営6500形
+    - 都営10-000形
+    - 都営10-300形
+    - 都営12-000形
+    - 都営12-600形
+    - 大阪メトロ10系
+    - 大阪メトロ100形
+    - 大阪メトロ20系
+    - 大阪メトロ21系
+    - 大阪メトロ22系
+    - 大阪メトロ23系
+    - 大阪メトロ24系
+    - 大阪メトロ25系
+    - 大阪メトロ30系
+    - 大阪メトロ30000系
+    - 大阪メトロ30000A系
+    - 大阪メトロ400系
+    - 大阪メトロ50系
+    - 大阪メトロ60系
+    - 大阪メトロ66系
+    - 大阪メトロ70系
+    - 大阪メトロ80系
 
 # Img filtering configuration
 image_filtering:
@@ -69,6 +139,8 @@ llm_labeling:
   reasoning_effort: "low" # "none" | "low" | "high"，reasoning effort越高，模型在做判断时需要提供的理由越详细，能提升准确率但也会增加成本和响应时间。
   web_search_context_size: "low"
   web_search_tool_choice: "auto"
+  # For manual catalog rows, non-empty values in these columns override Stage 06 LLM output.
+  locked_manual_metadata_columns: ["operator_jp", "operator_en"]
 
 
 # GDINO bbox detection and post-processing configuration

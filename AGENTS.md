@@ -231,7 +231,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 
 `stage_02` 使用 `config/manual_series_overrides.csv` 处理 Commons 命名差异、系列合并和人工修正。与 Commons 分类名相关的规则集中在 `pipeline/constants.py` 和 stage 脚本中；需要修改时先读现有逻辑，不要只凭文件名字符串硬编码。
 
-私铁与第三部门可通过 `config/manual_series_catalog.csv` 同时绕过运营公司车型列表解析和 Commons root 自动搜索。`source_series` 保留来源名/别名，`series` 是下游规范标签；`entry_kind=new` 用于新车型，`merge` 用于别名同车或沿用已有 JR 车型。车辆谱系相同的第三部门版本即使视觉差异明显，也必须先 merge 到 JR 基础 `series`，只允许在 Stage 08 根据 operator、submodel、番台或特殊涂装 metadata 拆成 `fine_grained_series`；只有实际无谱系关系的同名异车才为基础 `series` 添加运营公司限定。完整规则见 `docs/manual_series_catalog.md`。
+私铁与第三部门可通过 `config/manual_series_catalog.csv` 同时绕过运营公司车型列表解析和 Commons root 自动搜索。进行任何手工添加前，维护者或 LLM agent 必须先完整阅读 `docs/manual_series_catalog.md`，按其中的 Commons 真 root 标准核验并记录证据；不得只根据 category 名称猜测。`source_series` 保留来源名/别名，`series` 是下游规范标签；`entry_kind=new` 用于新车型，`merge` 用于别名同车或沿用已有 JR 车型。车辆谱系相同的第三部门版本即使视觉差异明显，也必须先 merge 到 JR 基础 `series`，只允许在 Stage 08 根据 operator、submodel、番台或特殊涂装 metadata 拆成 `fine_grained_series`；只有实际无谱系关系的同名异车才为基础 `series` 添加运营公司限定。Stage 06 通过 `llm_labeling.locked_manual_metadata_columns` 将人工目录里的非空稳定字段按图片覆盖 LLM 输出；当前锁定 operator 日英文字段。
 
 `fine_grained_series` 用于更细粒度的训练标签；规则来源见 `config/manual_fine_grained_series.csv` 和 `fine_grain_series.rules_path` 配置。DINOv3 特征缓存只绑定 crop 图像和 `crop_id`，修改细粒度标签规则后通常只需重跑 `fine_grain_series`、`loss_tracking` 与后续噪声分析阶段，不需要重跑 `feature_extraction`。
 
@@ -254,6 +254,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 - `images.excluded` / `exclude_reason`：关键词与 SigLIP2 等过滤结果。
 - `images.siglip_processed`：SigLIP2 图片过滤是否已处理。
 - `images.llm_metadata_processed`：Stage 06 是否已将分类路径 metadata 回写到该图片；迁移时既有图片标记为已处理，新抓取图片默认未处理。
+- `images.manual_metadata_json`：人工车型目录随 manifest 写入的逐图稳定 metadata；Stage 06 只按 `llm_labeling.locked_manual_metadata_columns` 覆盖对应 LLM 字段，并会对已处理图片重新强制应用锁定值。
 - `images.download_status`：`not_started`、`downloaded`、`failed`、`missing_url`。
 - `images.downloaded_path`：相对 `path.data_root` 的图片路径，通常形如 `img/<series>/<file>`。
 - `crops.crop_status`：`pending`、`ok`、`rejected`。
@@ -267,6 +268,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 - `crawler.manifest_max_depth`、`manifest_max_files_per_category` 控制 Commons 分类递归与每分类文件上限；`crawler.manifest_reprocess` 控制是否忽略 category checkpoint 并覆盖重爬 manifest。
 - `image_filtering.*` 控制 SigLIP2 图片过滤。
 - `llm_labeling.*` 控制 OpenAI 元数据抽取，包括是否为 Responses API 启用 `web_search` 工具。
+- `llm_labeling.locked_manual_metadata_columns` 仅接受 Stage 06 的 detail 字段名；对应人工目录值非空时按图片优先于 LLM，未提供人工值的字段仍由 category path + LLM 决定。
 - `fine_grain_series.*` 控制细粒度车型标签规则。
 - `gdino.*` 控制 Grounding-DINO 检测阈值、NMS 与批大小。
 - `noise_detection.*` 控制后续 DINO 特征缓存和 small-loss 噪声检测实验；`image_size` 控制特征提取阶段输入 processor 的正方形 resize/crop 分辨率，修改后需要重跑 `feature_extraction`；`feature_cache_shard_size` 控制特征提取阶段 `.pt` 分片保存后再聚合为单文件缓存。训练标签 id 在 `loss_tracking` 每轮根据当前数据库标签动态生成，并保存到该轮 loss analysis 目录的 `label_map.json`。`loss_tracking` 会按 `noise_detection.exclude_manual_noise` / `exclude_predicted_noise` 过滤人工噪声与上一轮 LR 预测噪声；`manual_corrected_label` 会覆盖原标签并保留为训练样本。详细设计见 `docs/noise_review_loop.md`。
