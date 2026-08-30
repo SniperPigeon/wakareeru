@@ -11,6 +11,14 @@ from tqdm.auto import tqdm
 
 config = utils.load_pipeline_config()
 logger = utils.get_logger("stage_06_llm_metadata_labeling")
+DETAIL_COLS = [
+    "submodel",
+    "bandai",
+    "operator_en",
+    "operator_jp",
+    "special_formation",
+    "special_livery",
+]
 
 
 def _batched(iterable, n: int):
@@ -166,12 +174,95 @@ def apply_operator_jp_manual_override(value: str | None) -> str | None:
     return value
 
 
+def validate_locked_manual_metadata_columns(columns) -> list[str]:
+    """Validate the explicit Stage 06 manual-lock allowlist from config."""
+    if not isinstance(columns, list) or not all(isinstance(col, str) for col in columns):
+        raise ValueError("llm_labeling.locked_manual_metadata_columns 必须是字符串列表")
+    invalid = sorted(set(columns) - set(DETAIL_COLS))
+    if invalid:
+        raise ValueError(
+            "llm_labeling.locked_manual_metadata_columns 包含非 Stage 06 字段："
+            f"{invalid}"
+        )
+    return list(dict.fromkeys(columns))
+
+
+def parse_manual_metadata_json(value) -> dict[str, str]:
+    """Parse a per-image manual metadata object stored by Stage 03."""
+    if value is None or (isinstance(value, float) and pd.isna(value)) or value == "":
+        return {}
+    parsed = json.loads(value) if isinstance(value, str) else value
+    if not isinstance(parsed, dict):
+        raise ValueError("images.manual_metadata_json 必须是 JSON object")
+    result = {}
+    for key, item in parsed.items():
+        if item is None or (isinstance(item, float) and pd.isna(item)):
+            continue
+        if isinstance(item, (list, dict)):
+            raise ValueError(f"manual metadata {key} 必须是标量字符串")
+        text = str(item).strip()
+        if text:
+            result[str(key)] = text
+    return result
+
+
+def overlay_locked_manual_metadata(
+    llm_detail: dict,
+    manual_metadata_json,
+    locked_columns: list[str],
+) -> tuple[dict, list[str]]:
+    """Overlay configured non-empty manual values onto one image's LLM result."""
+    result = dict(llm_detail)
+    manual = parse_manual_metadata_json(manual_metadata_json)
+    applied = []
+    for col in locked_columns:
+        if col in manual:
+            result[col] = manual[col]
+            applied.append(col)
+    return result, applied
+
+
+def enforce_manual_metadata_locks(
+    conn: sqlite3.Connection,
+    locked_columns: list[str],
+) -> tuple[int, int]:
+    """Apply configured manual values to all matching images, including processed rows."""
+    if not locked_columns:
+        return 0, 0
+    rows = conn.execute(
+        """
+        SELECT id, manual_metadata_json
+        FROM images
+        WHERE manual_metadata_json <> '{}'
+        """
+    ).fetchall()
+    image_count = 0
+    field_count = 0
+    for image_id, manual_metadata_json in rows:
+        manual = parse_manual_metadata_json(manual_metadata_json)
+        values = {col: manual[col] for col in locked_columns if col in manual}
+        if not values:
+            continue
+        set_clause = ", ".join(f"{col} = ?" for col in values)
+        conn.execute(
+            f"UPDATE images SET {set_clause} WHERE id = ?",
+            [*values.values(), image_id],
+        )
+        image_count += 1
+        field_count += len(values)
+    conn.commit()
+    return image_count, field_count
+
+
 
 def main(config: dict | None = None):
     if config is None:
         config = utils.load_pipeline_config()
     utils.init_db(config=config)
     llm_config = config["llm_labeling"]
+    locked_manual_metadata_columns = validate_locked_manual_metadata_columns(
+        llm_config["locked_manual_metadata_columns"]
+    )
     OPENAI_MODEL_NAME = llm_config["openai_model_name"]
     effort = llm_config['reasoning_effort']
     batch_size = int(llm_config["batch_size"])
@@ -187,12 +278,24 @@ def main(config: dict | None = None):
     )
 
     with sqlite3.connect(db_path) as conn:
-        category_paths = pd.read_sql_query("""
-                                    SELECT category_path_json
-                                    FROM images
-                                    WHERE llm_metadata_processed = 0
-                                    GROUP BY category_path_json
-                                    """, conn)
+        locked_image_count, locked_field_count = enforce_manual_metadata_locks(
+            conn, locked_manual_metadata_columns
+        )
+        pending_images = pd.read_sql_query(
+            """
+            SELECT id, category_path_json, manual_metadata_json
+            FROM images
+            WHERE llm_metadata_processed = 0
+            """,
+            conn,
+        )
+    if locked_field_count:
+        logger.info(
+            "已先对%d条图片强制应用%d个手工 metadata 锁定值。",
+            locked_image_count,
+            locked_field_count,
+        )
+    category_paths = pending_images[["category_path_json"]].drop_duplicates().reset_index(drop=True)
     logger.info("共发现%d条尚未回写的唯一category_path。", len(category_paths))
     if category_paths.empty:
         logger.info("没有待处理的LLM metadata，跳过Stage 06。")
@@ -261,8 +364,7 @@ def main(config: dict | None = None):
         return
 
     
-        # 将 category details 回写到 images 表。幂等。
-    DETAIL_COLS = ["submodel", "bandai", "operator_en", "operator_jp", "special_formation", "special_livery"]
+    # 将 category details 按图片回写；同一路径的手工锁定值可以不同。
 
     llm_details = pd.read_csv(details_path, dtype={"bandai": str})
     target_paths = set(category_paths["category_path_json"].astype(str))
@@ -292,6 +394,23 @@ def main(config: dict | None = None):
     if missing:
         raise ValueError(f"details missing columns: {missing}")
 
+    detail_by_path = {
+        str(row["category_path_json"]): {col: row[col] for col in DETAIL_COLS}
+        for _, row in llm_details.iterrows()
+    }
+    update_rows = []
+    pending_locked_field_count = 0
+    pending_locked_image_count = 0
+    for _, image in pending_images.iterrows():
+        detail, applied = overlay_locked_manual_metadata(
+            detail_by_path[str(image["category_path_json"])],
+            image["manual_metadata_json"],
+            locked_manual_metadata_columns,
+        )
+        update_rows.append([detail[col] for col in DETAIL_COLS] + [int(image["id"])])
+        pending_locked_field_count += len(applied)
+        pending_locked_image_count += bool(applied)
+
     with sqlite3.connect(db_path) as conn:
         existing = {row[1] for row in conn.execute("PRAGMA table_info(images)")}
         for col in DETAIL_COLS:
@@ -299,22 +418,23 @@ def main(config: dict | None = None):
                 conn.execute(f"ALTER TABLE images ADD COLUMN {col} TEXT")
 
         set_clause = ", ".join(f"{col} = ?" for col in DETAIL_COLS)
-        update_rows = llm_details[DETAIL_COLS + ["category_path_json"]].values.tolist()
         before_changes = conn.total_changes
         conn.executemany(
             f"""
             UPDATE images
             SET {set_clause}, llm_metadata_processed = 1
-            WHERE category_path_json = ? AND llm_metadata_processed = 0
+            WHERE id = ? AND llm_metadata_processed = 0
             """,
             update_rows,
         )
         conn.commit()
 
         logger.info(
-            "已用%d条category metadata增量回写%d条新图片；既有已处理图片未覆盖。",
-            len(update_rows),
+            "已用%d条category metadata增量回写%d条新图片；其中%d条图片的%d个字段使用手工锁定值；既有已处理图片未覆盖。",
+            len(llm_details),
             conn.total_changes - before_changes,
+            pending_locked_image_count,
+            pending_locked_field_count,
         )
 
 
