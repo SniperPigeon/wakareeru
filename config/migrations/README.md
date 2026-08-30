@@ -13,3 +13,10 @@ advanced to that script number.
 
 Keep migrations append-only. For a new database, `config/schema.sql` creates the
 latest baseline schema; migrations are mainly for upgrading existing databases.
+
+When the latest baseline schema already contains a newly migrated column, add this
+directive to make the migration safe for a database whose version lags its schema:
+
+```sql
+-- migration_skip_if_column_exists: table_name.column_name
+```

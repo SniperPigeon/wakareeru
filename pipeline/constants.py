@@ -166,7 +166,14 @@ CATEGORY_EXCLUDE_PATTERNS = (
 )
 
 SERIES_CATEGORY_EXCLUDE_PATTERNS = {
-    #"E231系": ("tokyu", "tōkyū", "toei", "shibuya hikarie"),
+    # These Tokyo Metro roots contain operator-specific transfer subtrees.
+    # Keep the root's manually locked operator metadata truthful by skipping them.
+    "東京メトロ01系": ("kumamoto electric railway 01 series",),
+    "東京メトロ03系": ("ex-tokyo metro 03 series",),
+    "東京メトロ05系": ("seri 05",),
+    "東京メトロ5000系": ("ex-tokyo metro 5000 series",),
+    "東京メトロ6000系": ("seri 6000",),
+    "東京メトロ7000系": ("seri 7000",),
 }
 
 POWER_TYPE_MAP = {
