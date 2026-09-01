@@ -174,6 +174,98 @@ New 20 系列按 21--25 系分别抓取，避免把不同线路与外观标签�
 AGT，不纳入本批地下铁目录。东京地下铁 root 内的海外/他社转让子树通过
 `SERIES_CATEGORY_EXCLUDE_PATTERNS` 排除，防止人工锁定的 operator 污染转让车辆。
 
+### 第四批 root 核验台账：地铁直通私铁及其现役车辆
+
+2026-08-31 以小田急、东武、西武和东急官方现役车辆介绍为清单基线，通过
+Commons API 核验 `categoryinfo`、直接父分类和主要子分类。所有采用的 root
+都是非空车型级分类；子型 root 的父分类能回到对应车族。全部车型写入
+`manual_series_catalog.csv` 并进入 `crawler.series_test_scope`。近似子型仍保留独立基础
+series/root 以维持来源和递归边界，Stage 08 再合并为车族级训练标签。
+
+小田急采用以下 9 个 root，直接父分类均包含
+`Electric multiple units of Odakyu Electric Railway` 或 `Odakyu Romancecar`：
+
+| root | 当日 files/subcats | 处理 |
+| --- | ---: | --- |
+| `Odakyu 1000 series` | 115 / 2 | 现役通勤车；保留历史千代田线直通资料 |
+| `Odakyu 2000 series` | 41 / 0 | 现役通勤车 |
+| `Odakyu 3000 series (II)` | 131 / 1 | 现役通勤车 |
+| `Odakyu 4000 series (II)` | 56 / 4 | 千代田线与常磐缓行线直通；进 scope |
+| `Odakyu 5000 series (II)` | 37 / 1 | 现役通勤车 |
+| `Odakyu 8000 series` | 110 / 1 | 小田急原车谱 root；西武8000以 merge 追加 |
+| `Odakyu 30000 series EXE` | 60 / 1 | Romancecar EXE / EXEα |
+| `Odakyu 60000 series MSE` | 64 / 2 | 千代田线/有乐町线直通特急；进 scope |
+| `Odakyu 70000 series GSE` | 21 / 1 | Romancecar GSE |
+
+东武采用以下 21 个 root。50000、70000、9000 和 10000 系列的父 root
+含有独立子型；为了避免父 root 递归与子型 root 重复，父 series 通过
+`SERIES_CATEGORY_EXCLUDE_PATTERNS` 跳过已单独登记的子树：
+
+| root | 当日 files/subcats | 处理 |
+| --- | ---: | --- |
+| `Tobu N100 series` | 49 / 1 | SPACIA X |
+| `Tobu 100 series` | 159 / 0 | SPACIA |
+| `Tobu 200 series` | 67 / 1 | 特急车 |
+| `Tobu 500 series` | 46 / 1 | Revaty |
+| `Tobu 634 series` | 35 / 0 | 6050 系改造观光车 |
+| `Tobu 8000 series` | 243 / 1 | 800/850 型包含在同车族 |
+| `Tobu 9000 series` | 43 / 1 | 有乐町/副都心线直通；排除 9050 子树；进 scope |
+| `Tobu 9050 series` | 13 / 0 | `Tobu 9000 series` 子型；进 scope |
+| `Tobu 10000 series` | 23 / 14 | 排除单独登记的 10030/10080 子树 |
+| `Tobu 10030 series` | 28 / 14 | 10030/10050 车族 |
+| `Tobu 10080 series` | 2 / 0 | merge 到东武10030型 |
+| `Tobu 20400 series` | 10 / 4 | 20000 系改造车；子分类为 20410--20440 |
+| `Tobu 30000 series` | 71 / 0 | 历史半藏门线直通车 |
+| `Tobu 50000 series` | 41 / 3 | 地上基本型；排除 50050/50070/50090 子树 |
+| `Tobu 50050 series` | 64 / 0 | 半藏门线/东急田园都市线直通；进 scope |
+| `Tobu 50070 series` | 34 / 0 | 有乐町/副都心线直通；进 scope |
+| `Tobu 50090 series` | 39 / 0 | TJ Liner |
+| `Tobu 60000 series` | 33 / 7 | Urban Park Line |
+| `Tobu 70000 series` | 25 / 1 | 日比谷线直通；排除 70090 子树；进 scope |
+| `Tobu 70090 series` | 21 / 0 | TH Liner；日比谷线直通；进 scope |
+| `Tobu 80000 series` | 24 / 0 | Urban Park Line |
+
+东武90000系在核验日尚未开始营业，Commons 也没有非空车型 root，因此暂不写入
+人工目录；待营业照片形成稳定分类后再核验。
+
+西武采用以下 14 个 root，直接父分类均能回到
+`Electric multiple units of Seibu Railway`：
+
+| root | 当日 files/subcats | 处理 |
+| --- | ---: | --- |
+| `Seibu 001 series` | 82 / 2 | Laview |
+| `Seibu 10000 series` | 70 / 2 | New Red Arrow |
+| `Seibu 101 series` | 176 / 8 | 现役 101 车族 |
+| `Seibu 2000 series` | 181 / 2 | 2000 / New 2000 车族 |
+| `Seibu 20000 series` | 53 / 3 | 现役通勤车 |
+| `Seibu 30000 series` | 85 / 1 | Smile Train |
+| `Seibu 4000 series` | 45 / 2 | 近郊型 |
+| `Seibu 40000 series` | 67 / 2 | 有乐町/副都心/东横线直通；进 scope |
+| `Seibu 6000 series` | 130 / 1 | 有乐町/副都心/东横线直通；6000/6050 暂不拆分；进 scope |
+| `Seibu 7000 series` | 62 / 1 | `Ex-Tōkyū 9000 series`；merge 到东急9000系，暂不做新基础标签 |
+| `Seibu 8000 series` | 21 / 1 | `Ex-Odakyu 8000 series`；merge 到小田急8000形，暂不做新基础标签 |
+| `Seibu 8500 series` | 30 / 1 | 山口线胶轮式车辆 |
+| `Seibu 9000 series` | 35 / 5 | 现役通勤车 |
+| `Seibu L00 series` | 5 / 1 | 山口线新型胶轮式车辆 |
+
+东急现役官方车族采用以下 root，并为西武7000系保留已退役的东急9000系
+原始谱系 root：
+
+| root | 当日 files/subcats | 处理 |
+| --- | ---: | --- |
+| `Tōkyū 1000 series` | 70 / 1 | 现役池上/多摩川线；历史日比谷线直通 |
+| `Tōkyū 3000 series (II)` | 50 / 0 | 南北线/都营三田线直通；进 scope |
+| `Tōkyū 5000 series (II)` | 76 / 3 | 子分类为 5050、5050-4000、5080；全车族合并为东急5000系并进 scope |
+| `Tōkyū 6000 series (II)` | 49 / 0 | 大井町线 |
+| `Tōkyū 7000 series (II)` | 33 / 0 | 池上/多摩川线 |
+| `Tokyu 2020 series` | 27 / 3 | 半藏门线直通；排除 3020/6020 子树；进 scope |
+| `Tokyu 3020 series` | 20 / 0 | 南北线/都营三田线直通；进 scope |
+| `Tokyu 6020 series` | 19 / 0 | 大井町线 |
+| `Tōkyū 9000 series` | 30 / 20 | 东急已退役原车谱；西武7000以 merge 追加 |
+
+本批所有 50 个规范 series 均纳入 scope。Stage 08 将东武50000/50050/50070/50090、
+东武9000/9050、东武70000/70090 以及东急2020/3020/6020 分别合并为车族级训练标签。
+
 ## CSV 字段
 
 | 字段 | 必填 | 说明 |

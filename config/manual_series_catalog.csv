@@ -70,3 +70,56 @@ IGR7000系,701系,merge,JR東日本701系電車#IGRいわて銀河鉄道IGR7000�
 66系,大阪メトロ66系,new,大阪市交通局66系電車,大阪市高速電気軌道66系電車,現役,電車,通勤形,大阪市高速電気軌道,Osaka Metro,Osaka Subway 66 series
 70系,大阪メトロ70系,new,大阪市交通局70系電車,大阪市高速電気軌道70系電車,現役,電車,通勤形,大阪市高速電気軌道,Osaka Metro,Osaka Subway 70 series
 80系,大阪メトロ80系,new,大阪市交通局80系電車,大阪市高速電気軌道80系電車,現役,電車,通勤形,大阪市高速電気軌道,Osaka Metro,Osaka Subway 80 series
+1000形,小田急1000形,new,小田急1000形電車,小田急1000形電車,現役,電車,通勤形,小田急電鉄,Odakyu Electric Railway,Odakyu 1000 series
+2000形,小田急2000形,new,小田急2000形電車,小田急2000形電車,現役,電車,通勤形,小田急電鉄,Odakyu Electric Railway,Odakyu 2000 series
+3000形,小田急3000形,new,小田急3000形電車 (2代),小田急3000形電車,現役,電車,通勤形,小田急電鉄,Odakyu Electric Railway,Odakyu 3000 series (II)
+4000形,小田急4000形,new,小田急4000形電車 (2代),小田急4000形電車,現役,電車,通勤形,小田急電鉄,Odakyu Electric Railway,Odakyu 4000 series (II)
+5000形,小田急5000形,new,小田急5000形電車 (2代),小田急5000形電車,現役,電車,通勤形,小田急電鉄,Odakyu Electric Railway,Odakyu 5000 series (II)
+8000形,小田急8000形,new,小田急8000形電車,小田急8000形電車,現役,電車,通勤形,小田急電鉄,Odakyu Electric Railway,Odakyu 8000 series
+30000形,小田急30000形,new,小田急30000形電車,小田急30000形電車,現役,電車,特急形,小田急電鉄,Odakyu Electric Railway,Odakyu 30000 series EXE
+60000形,小田急60000形,new,小田急60000形電車,小田急60000形電車,現役,電車,特急形,小田急電鉄,Odakyu Electric Railway,Odakyu 60000 series MSE
+70000形,小田急70000形,new,小田急70000形電車,小田急70000形電車,現役,電車,特急形,小田急電鉄,Odakyu Electric Railway,Odakyu 70000 series GSE
+N100系,東武N100系,new,東武N100系電車,東武N100系電車,現役,電車,特急形,東武鉄道,Tobu Railway,Tobu N100 series
+100系,東武100系,new,東武100系電車,東武100系電車,現役,電車,特急形,東武鉄道,Tobu Railway,Tobu 100 series
+200型,東武200型,new,東武200系電車,東武200系電車,現役,電車,特急形,東武鉄道,Tobu Railway,Tobu 200 series
+500系,東武500系,new,東武500系電車,東武500系電車,現役,電車,特急形,東武鉄道,Tobu Railway,Tobu 500 series
+634型,東武634型,new,東武605系電車#634型,東武634型電車,現役,電車,特急形,東武鉄道,Tobu Railway,Tobu 634 series
+8000系,東武8000系,new,東武8000系電車,東武8000系電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 8000 series
+9000型,東武9000型,new,東武9000系電車,東武9000型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 9000 series
+9050型,東武9050型,new,東武9000系電車#9050型,東武9050型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 9050 series
+10000型,東武10000型,new,東武10000系電車,東武10000型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 10000 series
+10030型,東武10030型,new,東武10000系電車#10030型,東武10030型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 10030 series
+10080型,東武10030型,merge,東武10000系電車#10080型,東武10080型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 10080 series
+20400型,東武20400型,new,東武20000系電車#20400型,東武20400型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 20400 series
+30000系,東武30000系,new,東武30000系電車,東武30000系電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 30000 series
+50000型,東武50000型,new,東武50000系電車,東武50000型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 50000 series
+50050型,東武50050型,new,東武50000系電車#50050型,東武50050型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 50050 series
+50070型,東武50070型,new,東武50000系電車#50070型,東武50070型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 50070 series
+50090型,東武50090型,new,東武50000系電車#50090型,東武50090型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 50090 series
+60000系,東武60000系,new,東武60000系電車,東武60000系電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 60000 series
+70000型,東武70000型,new,東武70000系電車,東武70000型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 70000 series
+70090型,東武70090型,new,東武70000系電車#70090型,東武70090型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 70090 series
+80000系,東武80000系,new,東武80000系電車,東武80000系電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 80000 series
+001系,西武001系,new,西武001系電車,西武001系電車,現役,電車,特急形,西武鉄道,Seibu Railway,Seibu 001 series
+10000系,西武10000系,new,西武10000系電車,西武10000系電車,現役,電車,特急形,西武鉄道,Seibu Railway,Seibu 10000 series
+101系,西武101系,new,西武101系電車,西武101系電車,現役,電車,通勤形,西武鉄道,Seibu Railway,Seibu 101 series
+2000系,西武2000系,new,西武2000系電車,西武2000系電車,現役,電車,通勤形,西武鉄道,Seibu Railway,Seibu 2000 series
+20000系,西武20000系,new,西武20000系電車,西武20000系電車,現役,電車,通勤形,西武鉄道,Seibu Railway,Seibu 20000 series
+30000系,西武30000系,new,西武30000系電車,西武30000系電車,現役,電車,通勤形,西武鉄道,Seibu Railway,Seibu 30000 series
+4000系,西武4000系,new,西武4000系電車,西武4000系電車,現役,電車,近郊形,西武鉄道,Seibu Railway,Seibu 4000 series
+40000系,西武40000系,new,西武40000系電車,西武40000系電車,現役,電車,通勤形,西武鉄道,Seibu Railway,Seibu 40000 series
+6000系,西武6000系,new,西武6000系電車,西武6000系電車,現役,電車,通勤形,西武鉄道,Seibu Railway,Seibu 6000 series
+9000系,東急9000系,new,東急9000系電車,東急9000系電車,廃止,電車,通勤形,東急電鉄,Tokyu Railways,Tōkyū 9000 series
+7000系,東急9000系,merge,西武7000系電車,西武7000系電車,導入予定,電車,通勤形,西武鉄道,Seibu Railway,Seibu 7000 series
+8000系,小田急8000形,merge,西武8000系電車,西武8000系電車,現役,電車,通勤形,西武鉄道,Seibu Railway,Seibu 8000 series
+8500系,西武8500系,new,西武8500系電車,西武8500系電車,現役,電車,案内軌条式,西武鉄道,Seibu Railway,Seibu 8500 series
+9000系,西武9000系,new,西武9000系電車,西武9000系電車,現役,電車,通勤形,西武鉄道,Seibu Railway,Seibu 9000 series
+L00系,西武L00系,new,西武L00系電車,西武L00系電車,現役,電車,案内軌条式,西武鉄道,Seibu Railway,Seibu L00 series
+1000系,東急1000系,new,東急1000系電車,東急1000系電車,現役,電車,通勤形,東急電鉄,Tokyu Railways,Tōkyū 1000 series
+3000系,東急3000系,new,東急3000系電車 (2代),東急3000系電車,現役,電車,通勤形,東急電鉄,Tokyu Railways,Tōkyū 3000 series (II)
+5000・5050・5080系,東急5000系,new,東急5000系電車 (2代),東急5000・5050・5080系電車,現役,電車,通勤形,東急電鉄,Tokyu Railways,Tōkyū 5000 series (II)
+6000系,東急6000系,new,東急6000系電車 (2代),東急6000系電車,現役,電車,通勤形,東急電鉄,Tokyu Railways,Tōkyū 6000 series (II)
+7000系,東急7000系,new,東急7000系電車 (2代),東急7000系電車,現役,電車,通勤形,東急電鉄,Tokyu Railways,Tōkyū 7000 series (II)
+2020系,東急2020系,new,東急2020系電車,東急2020系電車,現役,電車,通勤形,東急電鉄,Tokyu Railways,Tokyu 2020 series
+3020系,東急3020系,new,東急2020系電車#東急3020系電車,東急3020系電車,現役,電車,通勤形,東急電鉄,Tokyu Railways,Tokyu 3020 series
+6020系,東急6020系,new,東急2020系電車#東急6020系電車,東急6020系電車,現役,電車,通勤形,東急電鉄,Tokyu Railways,Tokyu 6020 series

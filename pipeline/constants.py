@@ -174,6 +174,17 @@ SERIES_CATEGORY_EXCLUDE_PATTERNS = {
     "東京メトロ5000系": ("ex-tokyo metro 5000 series",),
     "東京メトロ6000系": ("seri 6000",),
     "東京メトロ7000系": ("seri 7000",),
+    # These operator family roots contain distinct subseries that are catalogued
+    # separately so crawler.series_test_scope can enable only through-service stock.
+    "東武9000型": ("tobu 9050 series",),
+    "東武10000型": ("tobu 10030 series", "tobu 10080 series"),
+    "東武50000型": (
+        "tobu 50050 series",
+        "tobu 50070 series",
+        "tobu 50090 series",
+    ),
+    "東武70000型": ("tobu 70090 series",),
+    "東急2020系": ("tokyu 3020 series", "tokyu 6020 series"),
 }
 
 POWER_TYPE_MAP = {

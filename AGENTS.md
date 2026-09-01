@@ -231,7 +231,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 
 `stage_02` 使用 `config/manual_series_overrides.csv` 处理 Commons 命名差异、系列合并和人工修正。与 Commons 分类名相关的规则集中在 `pipeline/constants.py` 和 stage 脚本中；需要修改时先读现有逻辑，不要只凭文件名字符串硬编码。
 
-私铁与第三部门可通过 `config/manual_series_catalog.csv` 同时绕过运营公司车型列表解析和 Commons root 自动搜索。进行任何手工添加前，维护者或 LLM agent 必须先完整阅读 `docs/manual_series_catalog.md`，按其中的 Commons 真 root 标准核验并记录证据；不得只根据 category 名称猜测。`source_series` 保留来源名/别名，`series` 是下游规范标签；`entry_kind=new` 用于新车型，`merge` 用于别名同车或沿用已有 JR 车型。车辆谱系相同的第三部门版本即使视觉差异明显，也必须先 merge 到 JR 基础 `series`，只允许在 Stage 08 根据 operator、submodel、番台或特殊涂装 metadata 拆成 `fine_grained_series`；只有实际无谱系关系的同名异车才为基础 `series` 添加运营公司限定。Stage 06 通过 `llm_labeling.locked_manual_metadata_columns` 将人工目录里的非空稳定字段按图片覆盖 LLM 输出；当前锁定 operator 日英文字段。
+私铁与第三部门可通过 `config/manual_series_catalog.csv` 同时绕过运营公司车型列表解析和 Commons root 自动搜索。进行任何手工添加前，维护者或 LLM agent 必须先完整阅读 `docs/manual_series_catalog.md`，按其中的 Commons 真 root 标准核验并记录证据；不得只根据 category 名称猜测。`source_series` 保留来源名/别名，`series` 是下游规范标签；`entry_kind=new` 用于新车型，`merge` 用于别名同车或沿用已有车型。车辆谱系相同的继承/转籍版本即使视觉差异明显，也必须先 merge 到原始基础 `series`，只允许在 Stage 08 根据 operator、submodel、番台或特殊涂装 metadata 拆成 `fine_grained_series`；只有实际无谱系关系的同名异车才为基础 `series` 添加运营公司限定。当前小田急、东武、西武、东急已登记的车辆均已进入 `crawler.series_test_scope`；对 Commons 父子 root 保留独立基础 series 以维持来源和递归边界，Stage 08 再将东武50000、9000、70000 与东急2020近似车族合并成较粗训练标签。西武7000/8000系分别 merge 回东急9000系和小田急8000形。Stage 06 通过 `llm_labeling.locked_manual_metadata_columns` 将人工目录里的非空稳定字段按图片覆盖 LLM 输出；当前锁定 operator 日英文字段。
 
 `fine_grained_series` 用于更细粒度的训练标签；规则来源见 `config/manual_fine_grained_series.csv` 和 `fine_grain_series.rules_path` 配置。DINOv3 特征缓存只绑定 crop 图像和 `crop_id`，修改细粒度标签规则后通常只需重跑 `fine_grain_series`、`loss_tracking` 与后续噪声分析阶段，不需要重跑 `feature_extraction`。
 
