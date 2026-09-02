@@ -197,7 +197,7 @@ series/root 以维持来源和递归边界，Stage 08 再合并为车族级训�
 | `Odakyu 60000 series MSE` | 64 / 2 | 千代田线/有乐町线直通特急；进 scope |
 | `Odakyu 70000 series GSE` | 21 / 1 | Romancecar GSE |
 
-东武采用以下 21 个 root。50000、70000、9000 和 10000 系列的父 root
+东武采用以下 22 个 root。50000、70000、9000 和 10000 系列的父 root
 含有独立子型；为了避免父 root 递归与子型 root 重复，父 series 通过
 `SERIES_CATEGORY_EXCLUDE_PATTERNS` 跳过已单独登记的子树：
 
@@ -208,6 +208,7 @@ series/root 以维持来源和递归边界，Stage 08 再合并为车族级训�
 | `Tobu 200 series` | 67 / 1 | 特急车 |
 | `Tobu 500 series` | 46 / 1 | Revaty |
 | `Tobu 634 series` | 35 / 0 | 6050 系改造观光车 |
+| `Tobu 6050 series` | 121 / 2 | 普通6050系；子分类为野岩鉄道/会津鉄道6050系，同一 root 登记三家 operator 且不锁定单一 operator |
 | `Tobu 8000 series` | 243 / 1 | 800/850 型包含在同车族 |
 | `Tobu 9000 series` | 43 / 1 | 有乐町/副都心线直通；排除 9050 子树；进 scope |
 | `Tobu 9050 series` | 13 / 0 | `Tobu 9000 series` 子型；进 scope |
@@ -263,7 +264,7 @@ series/root 以维持来源和递归边界，Stage 08 再合并为车族级训�
 | `Tokyu 6020 series` | 19 / 0 | 大井町线 |
 | `Tōkyū 9000 series` | 30 / 20 | 东急已退役原车谱；西武7000以 merge 追加 |
 
-本批所有 50 个规范 series 均纳入 scope。Stage 08 将东武50000/50050/50070/50090、
+本批所有 51 个规范 series 均纳入 scope。Stage 08 将东武50000/50050/50070/50090、
 东武9000/9050、东武70000/70090 以及东急2020/3020/6020 分别合并为车族级训练标签。
 
 ## CSV 字段
