@@ -267,6 +267,12 @@ loss_analysis:
 
 logistic_regression_filter:
   minimum_reviewed_samples: 200
+  historical_sampling:
+    enabled: true
+    score_column: "noise_score_v1"
+    bins: 10
+    sample_to_current_ratio: 2.0
+    random_seed: 42
   # ============ LR相关配置 ============
   # 用于训练Logistic Regression的特征列。需要与loss_feature_file_name中提供的特征列匹配。
   feature_columns: ['mean', 'loss_tail_mean', 'loss_mean_pct_in_label',"error_rate", 'pred_label_rate']

@@ -1,29 +1,23 @@
-"""Template for adding a new Wakareeru pipeline stage.
+"""Fit the reviewed-sample logistic-regression noise filter."""
 
-Copy this file to ``stage_XX_name.py`` and keep only the imports you use.
-"""
-
-import os
-import re
 import sqlite3
-import sys
-from pathlib import Path
 import time
-from typing import Any
 
-import gradio as gr
 import numpy as np
 import pandas as pd
-from PIL import Image, ImageDraw
-from tqdm.auto import tqdm
 
 import constants
 import utils
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import average_precision_score, classification_report, confusion_matrix, roc_auc_score
+from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import StratifiedKFold, cross_val_predict, train_test_split
+from sklearn.model_selection import (
+    StratifiedKFold,
+    StratifiedShuffleSplit,
+    cross_val_predict,
+    train_test_split,
+)
 import joblib
 from lr_model import LogisticRegressionWithThreshold
 
@@ -60,6 +54,133 @@ def build_effective_review_labels(
         )
     effective.loc[old_corrected_wrong_label] = clean_label
     return effective
+
+
+def _sample_score_stratified_rows(
+    rows: pd.DataFrame,
+    *,
+    target_count: int,
+    score_column: str,
+    bins: int,
+    random_seed: int,
+) -> pd.DataFrame:
+    """Sample rows with pandas quantile bins and sklearn stratification."""
+    if target_count <= 0 or rows.empty:
+        return rows.iloc[0:0].copy()
+    if target_count >= len(rows):
+        return rows.copy()
+
+    # StratifiedShuffleSplit requires both partitions to contain every bin and
+    # each bin to have at least two rows. Reduce q automatically for small pools.
+    bin_count = min(
+        bins,
+        target_count,
+        len(rows) - target_count,
+        len(rows) // 2,
+    )
+    if bin_count < 2:
+        return rows.sample(n=target_count, random_state=random_seed)
+
+    score_bins = pd.qcut(
+        rows[score_column].rank(method="first"),
+        q=bin_count,
+        labels=False,
+        duplicates="drop",
+    )
+    splitter = StratifiedShuffleSplit(
+        n_splits=1,
+        train_size=target_count,
+        random_state=random_seed,
+    )
+    sampled_positions, _ = next(splitter.split(rows, score_bins))
+    return rows.iloc[sampled_positions].copy()
+
+
+def sample_historical_review_rows(
+    reviewed_data: pd.DataFrame,
+    *,
+    current_round_id: str,
+    sampling_config: dict,
+) -> pd.DataFrame:
+    """Keep current-round reviews and add score-stratified historical reviews."""
+    if not sampling_config["enabled"]:
+        return reviewed_data.copy()
+
+    score_column = str(sampling_config["score_column"]).strip()
+    bins = int(sampling_config["bins"])
+    sample_to_current_ratio = float(
+        sampling_config["sample_to_current_ratio"]
+    )
+    random_seed = int(sampling_config["random_seed"])
+    if not score_column:
+        raise ValueError(
+            "logistic_regression_filter.historical_sampling.score_column不能为空"
+        )
+    if score_column not in reviewed_data.columns:
+        raise ValueError(f"当前loss feature缺少历史抽样score列: {score_column!r}")
+    if bins < 1:
+        raise ValueError("logistic_regression_filter.historical_sampling.bins必须大于0")
+    if sample_to_current_ratio < 0:
+        raise ValueError(
+            "logistic_regression_filter.historical_sampling."
+            "sample_to_current_ratio必须大于等于0"
+        )
+
+    current_round_prefix = f"loss_round:{current_round_id}:"
+    current_mask = (
+        reviewed_data["noise_review_score_col"]
+        .fillna("")
+        .astype(str)
+        .str.startswith(current_round_prefix)
+    )
+    current_rows = reviewed_data[current_mask].copy()
+    historical_rows = reviewed_data[~current_mask].copy()
+    if historical_rows.empty or current_rows.empty:
+        logger.info(
+            "历史复核抽样：本轮样本=%d，历史候选=%d，无可配比样本。",
+            len(current_rows),
+            len(historical_rows),
+        )
+        return current_rows
+
+    historical_scores = pd.to_numeric(
+        historical_rows[score_column],
+        errors="coerce",
+    )
+    if historical_scores.isna().any():
+        bad_count = int(historical_scores.isna().sum())
+        raise ValueError(
+            f"历史复核样本有{bad_count}条缺少有效{score_column}，无法分桶抽样"
+        )
+    historical_rows[score_column] = historical_scores
+
+    label_column = "effective_noise_review_label"
+    sampled_history = []
+    current_counts = current_rows[label_column].value_counts()
+    for label_index, label in enumerate(sorted(current_counts.index.astype(str))):
+        candidates = historical_rows[historical_rows[label_column].eq(label)]
+        target_count = min(
+            len(candidates),
+            int(np.ceil(int(current_counts[label]) * sample_to_current_ratio)),
+        )
+        sampled = _sample_score_stratified_rows(
+            candidates,
+            target_count=target_count,
+            score_column=score_column,
+            bins=bins,
+            random_seed=random_seed + label_index * bins,
+        )
+        sampled_history.append(sampled)
+        logger.info(
+            "历史复核抽样 label=%s：本轮=%d，历史候选=%d，抽取=%d。",
+            label,
+            int(current_counts[label]),
+            len(candidates),
+            len(sampled),
+        )
+
+    sampled_parts = [current_rows, *sampled_history]
+    return pd.concat(sampled_parts, ignore_index=True)
     
 def main(config: dict | None = None) -> None:
     if config is None:
@@ -90,9 +211,6 @@ def main(config: dict | None = None) -> None:
     feature_columns = lr_config['feature_columns']
 
     reviewed_data = pd.merge(left=metas, right=features, on='crop_id', how='inner')
-    if len(reviewed_data) < lr_config['minimum_reviewed_samples']:
-        logger.warning(f"已审核数据样本量{len(reviewed_data)}小于设定的最小值{lr_config['minimum_reviewed_samples']}，可能无法训练出有效的模型")
-        return constants.STAGE_INTERRUPT # type: ignore
     logger.info(f"共有{len(reviewed_data)}条已审核数据")
 
 
@@ -118,6 +236,20 @@ def main(config: dict | None = None) -> None:
     )
     if skipped_labels:
         logger.warning("以下人工标签未纳入logistic regression训练: %s", skipped_labels)
+
+    filtered = sample_historical_review_rows(
+        filtered,
+        current_round_id=current_round_id,
+        sampling_config=lr_config["historical_sampling"],
+    )
+    if len(filtered) < lr_config['minimum_reviewed_samples']:
+        logger.warning(
+            "分层抽样后训练数据样本量%d小于设定的最小值%d，可能无法训练出有效的模型",
+            len(filtered),
+            lr_config['minimum_reviewed_samples'],
+        )
+        return constants.STAGE_INTERRUPT  # type: ignore
+    logger.info("分层抽样后共有%d条LR训练样本", len(filtered))
 
     X = filtered[feature_columns].astype(float).copy()
     y = filtered['effective_noise_review_label'].isin(noise_positive_label).to_numpy(dtype=np.int64)
