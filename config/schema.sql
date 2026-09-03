@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS images (
     wiki_title          TEXT,               -- Legacy per-image provenance; not used to export l10n metadata
     power_type          TEXT,               -- EMU | DMU | Electric Locomotive | Diesel Locomotive | Steam Locomotive | Electro-diesel Multiple Unit
     operator_en_json    TEXT NOT NULL,      -- JSON array, e.g. ["JR East"]
+    manual_metadata_json TEXT NOT NULL DEFAULT '{}', -- Per-image manual values eligible for Stage 06 locking
 
     -- Commons location
     root_category       TEXT NOT NULL,

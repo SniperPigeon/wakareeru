@@ -1,0 +1,126 @@
+source_series,series,entry_kind,wiki_title,full_name,status,type,subtype,operator_jp,operator_en,commons_root_category,submodel,bandai,special_formation,special_livery
+HOT3500形,HOT3500形,new,智頭急行HOT3500形気動車,智頭急行HOT3500形気動車,現役,気動車,一般形,智頭急行,Chizu Express,Chizu Express HOT 3500 series
+HOT7000系,HOT7000系,new,智頭急行HOT7000系気動車,智頭急行HOT7000系気動車,現役,気動車,特急形,智頭急行,Chizu Express,Chizu Express HOT 7000 series
+KTR001形,KTR001形,new,北近畿タンゴ鉄道KTR001形気動車,北近畿タンゴ鉄道KTR001形気動車,廃止,気動車,特急形,京都丹後鉄道,Kyoto Tango Railway,Kitakinki Tango Railway KTR 001
+MF100・200形,MF100・200形,new,宮福鉄道MF100形気動車,宮福鉄道MF100・MF200形気動車,現役,気動車,一般形,京都丹後鉄道,Kyoto Tango Railway,Miyafuku Railway MF100/200
+KTR300形,KTR300形,new,北近畿タンゴ鉄道KTR300形気動車,北近畿タンゴ鉄道KTR300形気動車,現役,気動車,一般形,京都丹後鉄道,Kyoto Tango Railway,Kitakinki Tango Railway KTR 300
+KTR700・800形,KTR700・800形,new,北近畿タンゴ鉄道KTR700形気動車,北近畿タンゴ鉄道KTR700・KTR800形気動車,現役,気動車,一般形,京都丹後鉄道,Kyoto Tango Railway,Kitakinki Tango Railway KTR 700/800
+KTR8000形,KTR8000形,new,北近畿タンゴ鉄道KTR8000形気動車,北近畿タンゴ鉄道KTR8000形気動車,現役,気動車,特急形,京都丹後鉄道,Kyoto Tango Railway,Kitakinki Tango Railway KTR 8000
+ET122形,キハ122系,merge,えちごトキめき鉄道ET122形気動車,えちごトキめき鉄道ET122形気動車,現役,気動車,一般形,えちごトキめき鉄道,Echigo Tokimeki Railway,ET122
+ET127系,E127系,merge,JR東日本E127系電車#えちごトキめき鉄道ET127系,えちごトキめき鉄道ET127系電車,現役,電車,通勤形,えちごトキめき鉄道,Echigo Tokimeki Railway,ET127
+HK100形,HK100形,new,北越急行HK100形電車,北越急行HK100形電車,現役,電車,近郊形,北越急行,Hokuetsu Express,Hokuetsu Express 100 series
+HSOR-100・150形,HSOR-100形,new,肥薩おれんじ鉄道HSOR-100形気動車,肥薩おれんじ鉄道HSOR-100・150形気動車,現役,気動車,一般形,肥薩おれんじ鉄道,Hisatsu Orange Railway,Hisatsu Orange Railway HSOR-100 series
+TKT-8000形,TKT-8000形,new,土佐くろしお鉄道TKT-8000形気動車,土佐くろしお鉄道TKT-8000形気動車,現役,気動車,一般形,土佐くろしお鉄道,Tosa Kuroshio Railway,Tosa Kuroshio Railway TKT8000 series
+9640形,9640形,new,土佐くろしお鉄道9640形気動車,土佐くろしお鉄道9640形気動車,現役,気動車,一般形,土佐くろしお鉄道,Tosa Kuroshio Railway,Tosa Kuroshio Railway 9640 series
+6000形,6000形,new,鹿島臨海鉄道6000形気動車,鹿島臨海鉄道6000形気動車,現役,気動車,一般形,鹿島臨海鉄道,Kashima Rinkai Railway,KRT 6000 series
+7000形,7000形,new,鹿島臨海鉄道7000形気動車,鹿島臨海鉄道7000形気動車,廃止,気動車,一般形,鹿島臨海鉄道,Kashima Rinkai Railway,KRT 7000 series
+8000形,8000形,new,鹿島臨海鉄道8000形気動車,鹿島臨海鉄道8000形気動車,現役,気動車,一般形,鹿島臨海鉄道,Kashima Rinkai Railway,KRT 8000 series
+36-100形,36-100形,new,三陸鉄道36-100形気動車,三陸鉄道36-100形気動車,現役,気動車,一般形,三陸鉄道,Sanriku Railway,Sanriku Railway 36-100
+36-200形,36-100形,merge,三陸鉄道36-100形気動車,三陸鉄道36-200形気動車,現役,気動車,一般形,三陸鉄道,Sanriku Railway,Sanriku Railway 36-200
+36-R形,36-R形,new,三陸鉄道36-R形気動車,三陸鉄道36-R形気動車,現役,気動車,一般形,三陸鉄道,Sanriku Railway,Sanriku Railway 36-R
+36-700形,36-700形,new,三陸鉄道36-700形気動車,三陸鉄道36-700形気動車,現役,気動車,一般形,三陸鉄道,Sanriku Railway,Sanriku Railway 36-700
+青い森701系,701系,merge,JR東日本701系電車#青い森鉄道青い森701系,青い森鉄道青い森701系電車,現役,電車,近郊形,青い森鉄道,Aoimori Railway,Aoimori 701 series
+青い森703系,E721系,merge,JR東日本E721系電車#青い森鉄道青い森703系,青い森鉄道青い森703系電車,現役,電車,近郊形,青い森鉄道,Aoimori Railway,Aoimori 703 series
+IGR7000系,701系,merge,JR東日本701系電車#IGRいわて銀河鉄道IGR7000系,IGRいわて銀河鉄道IGR7000系電車,現役,電車,近郊形,IGRいわて銀河鉄道,Iwate Galaxy Railway,IGR 7000 series
+01系,東京メトロ01系,new,営団01系電車,東京地下鉄01系電車,廃止,電車,通勤形,東京地下鉄,Tokyo Metro,Tokyo Metro 01 series
+02系,東京メトロ02系,new,営団02系電車,東京地下鉄02系電車,廃止,電車,通勤形,東京地下鉄,Tokyo Metro,Tokyo Metro 02 series
+03系,東京メトロ03系,new,営団03系電車,東京地下鉄03系電車,廃止,電車,通勤形,東京地下鉄,Tokyo Metro,Tokyo Metro 03 series
+05系,東京メトロ05系,new,営団05系電車,東京地下鉄05系電車,現役,電車,通勤形,東京地下鉄,Tokyo Metro,Tokyo Metro 05 series
+06系,東京メトロ06系,new,営団06系電車,東京地下鉄06系電車,廃止,電車,通勤形,東京地下鉄,Tokyo Metro,Tokyo Metro 06 series
+07系,東京メトロ07系,new,営団07系電車,東京地下鉄07系電車,現役,電車,通勤形,東京地下鉄,Tokyo Metro,Tokyo Metro 07 series
+08系,東京メトロ08系,new,営団08系電車,東京地下鉄08系電車,現役,電車,通勤形,東京地下鉄,Tokyo Metro,Tokyo Metro 08 series
+1000系,東京メトロ1000系,new,東京メトロ1000系電車,東京地下鉄1000系電車,現役,電車,通勤形,東京地下鉄,Tokyo Metro,Tokyo Metro 1000 series
+2000系,東京メトロ2000系,new,東京メトロ2000系電車,東京地下鉄2000系電車,現役,電車,通勤形,東京地下鉄,Tokyo Metro,Tokyo Metro 2000 series
+5000系,東京メトロ5000系,new,営団5000系電車,東京地下鉄5000系電車,廃止,電車,通勤形,東京地下鉄,Tokyo Metro,Tokyo Metro 5000 series
+6000系,東京メトロ6000系,new,営団6000系電車,東京地下鉄6000系電車,廃止,電車,通勤形,東京地下鉄,Tokyo Metro,Tokyo Metro 6000 series
+7000系,東京メトロ7000系,new,営団7000系電車,東京地下鉄7000系電車,廃止,電車,通勤形,東京地下鉄,Tokyo Metro,Tokyo Metro 7000 series
+8000系,東京メトロ8000系,new,営団8000系電車,東京地下鉄8000系電車,現役,電車,通勤形,東京地下鉄,Tokyo Metro,Tokyo Metro 8000 series
+9000系,東京メトロ9000系,new,営団9000系電車,東京地下鉄9000系電車,現役,電車,通勤形,東京地下鉄,Tokyo Metro,Tokyo Metro 9000 series
+10000系,東京メトロ10000系,new,東京メトロ10000系電車,東京地下鉄10000系電車,現役,電車,通勤形,東京地下鉄,Tokyo Metro,Tokyo Metro 10000 series
+13000系,東京メトロ13000系,new,東京メトロ13000系電車,東京地下鉄13000系電車,現役,電車,通勤形,東京地下鉄,Tokyo Metro,Tokyo Metro 13000 series
+15000系,東京メトロ15000系,new,東京メトロ15000系電車,東京地下鉄15000系電車,現役,電車,通勤形,東京地下鉄,Tokyo Metro,Tokyo Metro 15000 series
+16000系,東京メトロ16000系,new,東京メトロ16000系電車,東京地下鉄16000系電車,現役,電車,通勤形,東京地下鉄,Tokyo Metro,Tokyo Metro 16000 series
+17000系,東京メトロ17000系,new,東京メトロ17000系電車,東京地下鉄17000系電車,現役,電車,通勤形,東京地下鉄,Tokyo Metro,Tokyo Metro 17000 series
+18000系,東京メトロ18000系,new,東京メトロ18000系電車,東京地下鉄18000系電車,現役,電車,通勤形,東京地下鉄,Tokyo Metro,Tokyo Metro 18000 series
+5000形,都営5000形,new,東京都交通局5000形電車 (鉄道),東京都交通局5000形電車,廃止,電車,通勤形,東京都交通局,Tokyo Metropolitan Bureau of Transportation,Toei 5000 series
+5200形,都営5200形,new,東京都交通局5000形電車 (鉄道)#5200形,東京都交通局5200形電車,廃止,電車,通勤形,東京都交通局,Tokyo Metropolitan Bureau of Transportation,Toei 5200 series
+5300形,都営5300形,new,東京都交通局5300形電車,東京都交通局5300形電車,廃止,電車,通勤形,東京都交通局,Tokyo Metropolitan Bureau of Transportation,Toei 5300 series
+5500形,都営5500形,new,東京都交通局5500形電車 (鉄道),東京都交通局5500形電車,現役,電車,通勤形,東京都交通局,Tokyo Metropolitan Bureau of Transportation,Toei 5500 series
+6000形,都営6000形,new,東京都交通局6000形電車 (鉄道),東京都交通局6000形電車,廃止,電車,通勤形,東京都交通局,Tokyo Metropolitan Bureau of Transportation,Toei 6000 series
+6300形,都営6300形,new,東京都交通局6300形電車,東京都交通局6300形電車,現役,電車,通勤形,東京都交通局,Tokyo Metropolitan Bureau of Transportation,Toei 6300 series
+6500形,都営6500形,new,東京都交通局6500形電車 (鉄道),東京都交通局6500形電車,現役,電車,通勤形,東京都交通局,Tokyo Metropolitan Bureau of Transportation,Toei 6500 series
+10-000形,都営10-000形,new,東京都交通局10-000形電車,東京都交通局10-000形電車,廃止,電車,通勤形,東京都交通局,Tokyo Metropolitan Bureau of Transportation,Toei 10-000 series
+10-300形,都営10-300形,new,東京都交通局10-300形電車,東京都交通局10-300形電車,現役,電車,通勤形,東京都交通局,Tokyo Metropolitan Bureau of Transportation,Toei 10-300 series
+12-000形,都営12-000形,new,東京都交通局12-000形電車,東京都交通局12-000形電車,現役,電車,通勤形,東京都交通局,Tokyo Metropolitan Bureau of Transportation,Toei 12-000 series
+12-600形,都営12-600形,new,東京都交通局12-600形電車,東京都交通局12-600形電車,現役,電車,通勤形,東京都交通局,Tokyo Metropolitan Bureau of Transportation,Toei 12-600 series
+10系,大阪メトロ10系,new,大阪市交通局10系電車,大阪市高速電気軌道10系電車,廃止,電車,通勤形,大阪市高速電気軌道,Osaka Metro,Osaka Subway 10 series
+100形,大阪メトロ100形,new,大阪市電気局100形電車,大阪市高速電気軌道100形電車,廃止,電車,通勤形,大阪市高速電気軌道,Osaka Metro,Osaka Subway Type 100
+20系,大阪メトロ20系,new,大阪市交通局20系電車,大阪市高速電気軌道20系電車,廃止,電車,通勤形,大阪市高速電気軌道,Osaka Metro,Osaka Subway 20 series
+21系,大阪メトロ21系,new,大阪市交通局新20系電車#21系,大阪市高速電気軌道21系電車,現役,電車,通勤形,大阪市高速電気軌道,Osaka Metro,Osaka Subway 21 series
+22系,大阪メトロ22系,new,大阪市交通局新20系電車#22系,大阪市高速電気軌道22系電車,現役,電車,通勤形,大阪市高速電気軌道,Osaka Metro,Osaka Subway 22 series
+23系,大阪メトロ23系,new,大阪市交通局新20系電車#23系,大阪市高速電気軌道23系電車,現役,電車,通勤形,大阪市高速電気軌道,Osaka Metro,Osaka Subway 23 series
+24系,大阪メトロ24系,new,大阪市交通局新20系電車#24系,大阪市高速電気軌道24系電車,廃止,電車,通勤形,大阪市高速電気軌道,Osaka Metro,Osaka Subway 24 series
+25系,大阪メトロ25系,new,大阪市交通局新20系電車#25系,大阪市高速電気軌道25系電車,現役,電車,通勤形,大阪市高速電気軌道,Osaka Metro,Osaka Subway 25 series
+30系,大阪メトロ30系,new,大阪市交通局30系電車,大阪市高速電気軌道30系電車,廃止,電車,通勤形,大阪市高速電気軌道,Osaka Metro,Osaka Subway 30 series
+30000系,大阪メトロ30000系,new,大阪市交通局30000系電車,大阪市高速電気軌道30000系電車,現役,電車,通勤形,大阪市高速電気軌道,Osaka Metro,Osaka Subway 30000 series
+30000A系,大阪メトロ30000A系,new,大阪市交通局30000系電車#30000A系,大阪市高速電気軌道30000A系電車,現役,電車,通勤形,大阪市高速電気軌道,Osaka Metro,Osaka Metro 30000A series
+400系,大阪メトロ400系,new,Osaka Metro400系電車,大阪市高速電気軌道400系電車,現役,電車,通勤形,大阪市高速電気軌道,Osaka Metro,Osaka Metro 400 series
+50系,大阪メトロ50系,new,大阪市交通局5000形電車,大阪市高速電気軌道50系電車,廃止,電車,通勤形,大阪市高速電気軌道,Osaka Metro,Osaka Subway 50 series
+60系,大阪メトロ60系,new,大阪市交通局60系電車,大阪市高速電気軌道60系電車,廃止,電車,通勤形,大阪市高速電気軌道,Osaka Metro,Osaka Subway 60 series
+66系,大阪メトロ66系,new,大阪市交通局66系電車,大阪市高速電気軌道66系電車,現役,電車,通勤形,大阪市高速電気軌道,Osaka Metro,Osaka Subway 66 series
+70系,大阪メトロ70系,new,大阪市交通局70系電車,大阪市高速電気軌道70系電車,現役,電車,通勤形,大阪市高速電気軌道,Osaka Metro,Osaka Subway 70 series
+80系,大阪メトロ80系,new,大阪市交通局80系電車,大阪市高速電気軌道80系電車,現役,電車,通勤形,大阪市高速電気軌道,Osaka Metro,Osaka Subway 80 series
+1000形,小田急1000形,new,小田急1000形電車,小田急1000形電車,現役,電車,通勤形,小田急電鉄,Odakyu Electric Railway,Odakyu 1000 series
+2000形,小田急2000形,new,小田急2000形電車,小田急2000形電車,現役,電車,通勤形,小田急電鉄,Odakyu Electric Railway,Odakyu 2000 series
+3000形,小田急3000形,new,小田急3000形電車 (2代),小田急3000形電車,現役,電車,通勤形,小田急電鉄,Odakyu Electric Railway,Odakyu 3000 series (II)
+4000形,小田急4000形,new,小田急4000形電車 (2代),小田急4000形電車,現役,電車,通勤形,小田急電鉄,Odakyu Electric Railway,Odakyu 4000 series (II)
+5000形,小田急5000形,new,小田急5000形電車 (2代),小田急5000形電車,現役,電車,通勤形,小田急電鉄,Odakyu Electric Railway,Odakyu 5000 series (II)
+8000形,小田急8000形,new,小田急8000形電車,小田急8000形電車,現役,電車,通勤形,小田急電鉄,Odakyu Electric Railway,Odakyu 8000 series
+30000形,小田急30000形,new,小田急30000形電車,小田急30000形電車,現役,電車,特急形,小田急電鉄,Odakyu Electric Railway,Odakyu 30000 series EXE
+60000形,小田急60000形,new,小田急60000形電車,小田急60000形電車,現役,電車,特急形,小田急電鉄,Odakyu Electric Railway,Odakyu 60000 series MSE
+70000形,小田急70000形,new,小田急70000形電車,小田急70000形電車,現役,電車,特急形,小田急電鉄,Odakyu Electric Railway,Odakyu 70000 series GSE
+N100系,東武N100系,new,東武N100系電車,東武N100系電車,現役,電車,特急形,東武鉄道,Tobu Railway,Tobu N100 series
+100系,東武100系,new,東武100系電車,東武100系電車,現役,電車,特急形,東武鉄道,Tobu Railway,Tobu 100 series
+200型,東武200型,new,東武200系電車,東武200系電車,現役,電車,特急形,東武鉄道,Tobu Railway,Tobu 200 series
+500系,東武500系,new,東武500系電車,東武500系電車,現役,電車,特急形,東武鉄道,Tobu Railway,Tobu 500 series
+634型,東武634型,new,東武6050系電車#634型,東武634型電車,現役,電車,特急形,東武鉄道,Tobu Railway,Tobu 634 series
+6050系,東武6050系,new,東武6050系電車,東武6050系電車,廃止,電車,近郊形,東武鉄道|野岩鉄道|会津鉄道,Tobu Railway|Yagan Railway|Aizu Railway,Tobu 6050 series
+8000系,東武8000系,new,東武8000系電車,東武8000系電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 8000 series
+9000型,東武9000型,new,東武9000系電車,東武9000型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 9000 series
+9050型,東武9050型,new,東武9000系電車#9050型,東武9050型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 9050 series
+10000型,東武10000型,new,東武10000系電車,東武10000型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 10000 series
+10030型,東武10030型,new,東武10000系電車#10030型,東武10030型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 10030 series
+10080型,東武10030型,merge,東武10000系電車#10080型,東武10080型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 10080 series
+20400型,東武20400型,new,東武20000系電車#20400型,東武20400型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 20400 series
+30000系,東武30000系,new,東武30000系電車,東武30000系電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 30000 series
+50000型,東武50000型,new,東武50000系電車,東武50000型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 50000 series
+50050型,東武50050型,new,東武50000系電車#50050型,東武50050型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 50050 series
+50070型,東武50070型,new,東武50000系電車#50070型,東武50070型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 50070 series
+50090型,東武50090型,new,東武50000系電車#50090型,東武50090型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 50090 series
+60000系,東武60000系,new,東武60000系電車,東武60000系電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 60000 series
+70000型,東武70000型,new,東武70000系電車,東武70000型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 70000 series
+70090型,東武70090型,new,東武70000系電車#70090型,東武70090型電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 70090 series
+80000系,東武80000系,new,東武80000系電車,東武80000系電車,現役,電車,通勤形,東武鉄道,Tobu Railway,Tobu 80000 series
+001系,西武001系,new,西武001系電車,西武001系電車,現役,電車,特急形,西武鉄道,Seibu Railway,Seibu 001 series
+10000系,西武10000系,new,西武10000系電車,西武10000系電車,現役,電車,特急形,西武鉄道,Seibu Railway,Seibu 10000 series
+101系,西武101系,new,西武101系電車,西武101系電車,現役,電車,通勤形,西武鉄道,Seibu Railway,Seibu 101 series
+2000系,西武2000系,new,西武2000系電車,西武2000系電車,現役,電車,通勤形,西武鉄道,Seibu Railway,Seibu 2000 series
+20000系,西武20000系,new,西武20000系電車,西武20000系電車,現役,電車,通勤形,西武鉄道,Seibu Railway,Seibu 20000 series
+30000系,西武30000系,new,西武30000系電車,西武30000系電車,現役,電車,通勤形,西武鉄道,Seibu Railway,Seibu 30000 series
+4000系,西武4000系,new,西武4000系電車,西武4000系電車,現役,電車,近郊形,西武鉄道,Seibu Railway,Seibu 4000 series
+40000系,西武40000系,new,西武40000系電車,西武40000系電車,現役,電車,通勤形,西武鉄道,Seibu Railway,Seibu 40000 series
+6000系,西武6000系,new,西武6000系電車,西武6000系電車,現役,電車,通勤形,西武鉄道,Seibu Railway,Seibu 6000 series
+9000系,東急9000系,new,東急9000系電車,東急9000系電車,廃止,電車,通勤形,東急電鉄,Tokyu Railways,Tōkyū 9000 series
+7000系,東急9000系,merge,西武7000系電車,西武7000系電車,導入予定,電車,通勤形,西武鉄道,Seibu Railway,Seibu 7000 series
+8000系,小田急8000形,merge,西武8000系電車,西武8000系電車,現役,電車,通勤形,西武鉄道,Seibu Railway,Seibu 8000 series
+8500系,西武8500系,new,西武8500系電車,西武8500系電車,現役,電車,案内軌条式,西武鉄道,Seibu Railway,Seibu 8500 series
+9000系,西武9000系,new,西武9000系電車,西武9000系電車,現役,電車,通勤形,西武鉄道,Seibu Railway,Seibu 9000 series
+L00系,西武L00系,new,西武L00系電車,西武L00系電車,現役,電車,案内軌条式,西武鉄道,Seibu Railway,Seibu L00 series
+1000系,東急1000系,new,東急1000系電車,東急1000系電車,現役,電車,通勤形,東急電鉄,Tokyu Railways,Tōkyū 1000 series
+3000系,東急3000系,new,東急3000系電車 (2代),東急3000系電車,現役,電車,通勤形,東急電鉄,Tokyu Railways,Tōkyū 3000 series (II)
+5000・5050・5080系,東急5000系,new,東急5000系電車 (2代),東急5000・5050・5080系電車,現役,電車,通勤形,東急電鉄,Tokyu Railways,Tōkyū 5000 series (II)
+6000系,東急6000系,new,東急6000系電車 (2代),東急6000系電車,現役,電車,通勤形,東急電鉄,Tokyu Railways,Tōkyū 6000 series (II)
+7000系,東急7000系,new,東急7000系電車 (2代),東急7000系電車,現役,電車,通勤形,東急電鉄,Tokyu Railways,Tōkyū 7000 series (II)
+2020系,東急2020系,new,東急2020系電車,東急2020系電車,現役,電車,通勤形,東急電鉄,Tokyu Railways,Tokyu 2020 series
+3020系,東急3020系,new,東急2020系電車#東急3020系電車,東急3020系電車,現役,電車,通勤形,東急電鉄,Tokyu Railways,Tokyu 3020 series
+6020系,東急6020系,new,東急2020系電車#東急6020系電車,東急6020系電車,現役,電車,通勤形,東急電鉄,Tokyu Railways,Tokyu 6020 series

@@ -52,8 +52,11 @@ Gradio 人工复核
 
 stage_12 logistic_regression_filter
   - 读取本轮 loss feature
-  - 使用人工复核标签训练 wrong_label LR 分类器
+  - 全量保留本轮人工复核样本
+  - 历史人工样本重新使用本轮 noise_score_v1 分桶，并按本轮同类样本数的配置比例抽样
+  - 使用本轮样本与抽样后的历史样本训练 wrong_label LR 分类器
   - wrong_label 即使有 manual_corrected_label，本轮仍作为噪声正样本
+  - 旧轮次已经纠正标签的 wrong_label 在本轮作为 clean
   - ok 作为 clean 负样本
   - 保存 LR 模型和 latest_lr_model 指针
 
@@ -77,6 +80,26 @@ stage_13 lr_prediction
   这些阶段会优先使用 `manual_corrected_label`，没有时才回退到 `submodel`、`fine_grained_series` 或 `series`。
 
 这样设计可以同时满足两个目的：本轮用它训练噪声分类器，下一轮把它作为干净监督样本。
+
+## Stage 12 历史复核分桶抽样
+
+`logistic_regression_filter.historical_sampling` 控制历轮人工样本如何加入本轮 LR
+训练集。Stage 12 不读取或拼接历史 loss feature；它先把数据库中的历轮人工标签与本轮
+`demo_loss_feature.csv` 按 `crop_id` 连接，再完成 effective review label 转换。
+
+- 本轮样本由 `noise_review_score_col` 的
+  `loss_round:<current_round_id>:` 前缀识别，并全部保留。
+- 历史样本使用本轮 `score_column`，默认 `noise_score_v1`，通过 `pandas.qcut`
+  生成分位桶，再由 scikit-learn `StratifiedShuffleSplit` 完成分层抽样；小样本时自动
+  减少桶数，无法形成两个桶时回退到固定 seed 的随机抽样。
+- 每个 effective review label 的历史目标数为“本轮同类数量 ×
+  `sample_to_current_ratio`”；抽样尽量平均覆盖各非空 score 桶。
+- 历史中本轮没有对应类别的样本不进入训练集，避免旧类别单独定义本轮边界。
+- `random_seed` 固定抽样结果；抽样后的总数才用于
+  `minimum_reviewed_samples` 检查。
+
+该抽样只调整 LR 拟合数据组成，不把抽样后的概率解释为自然噪声发生率；当前 threshold
+仍由合并后的训练样本交叉验证结果选择。
 
 ## 训练过滤规则
 

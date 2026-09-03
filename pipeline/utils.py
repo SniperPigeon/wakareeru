@@ -355,6 +355,20 @@ def apply_migrations(conn: sqlite3.Connection, migrations_dir: Path) -> None:
             continue
 
         script = path.read_text(encoding="utf-8")
-        conn.executescript(script)
+        skip_match = re.search(
+            r"^-- migration_skip_if_column_exists: ([A-Za-z_][A-Za-z0-9_]*)\."
+            r"([A-Za-z_][A-Za-z0-9_]*)$",
+            script,
+            flags=re.MULTILINE,
+        )
+        should_skip = False
+        if skip_match:
+            table_name, column_name = skip_match.groups()
+            existing_columns = {
+                row[1] for row in conn.execute(f'PRAGMA table_info("{table_name}")')
+            }
+            should_skip = column_name in existing_columns
+        if not should_skip:
+            conn.executescript(script)
         conn.execute(f"PRAGMA user_version = {version}")
         current_version = version

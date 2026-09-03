@@ -50,6 +50,7 @@ pipeline/                  # 主数据管线；编号 stage 可独立运行
   utils.py                 # 路径、DB、配置、日志等辅助函数
 config/
   pipeline_config.yaml     # 路径、模型名、阈值、抓取范围等运行配置
+  manual_series_catalog.csv # 私铁/第三部门人工车型与 Commons root 快捷目录
   manual_series_overrides.csv
   schema.sql               # 新数据库的基线 schema
   migrations/              # 既有数据库的增量迁移，按数字顺序执行
@@ -205,8 +206,8 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 
 | Key | Script | 作用 |
 | --- | --- | --- |
-| `model_parsing` | `stage_01_model_parsing.py` | 从 Wikipedia wikitext 解析车辆系列 CSV，并排除 `導入予定` 等不纳入数据集的状态；人工确认的系列例外保留 |
-| `model_fixing` | `stage_02_model_fixing.py` | 应用人工修正，生成 Commons 根分类映射；候选与缓存 root 会用 Commons `categoryinfo` 检查是否含文件或子分类，空 root 失效后重新匹配；其余有效旧映射按 key 复用，新 key 与历史未联网占位记录会联网补查 |
+| `model_parsing` | `stage_01_model_parsing.py` | 从 Wikipedia wikitext 解析车辆系列 CSV，并排除 `導入予定` 等不纳入数据集的状态；随后追加 `manual_series_catalog.csv` 中显式登记的私铁/第三部门抓取入口 |
+| `model_fixing` | `stage_02_model_fixing.py` | 应用人工修正，生成 Commons 根分类映射；人工车型目录所填 root 直接采用；相同规范 series/root 的别名来源合并 operator，不同 root 保留为多个抓取入口；其余候选与缓存 root 会用 Commons `categoryinfo` 检查是否含文件或子分类 |
 | `manifest_crawling` | `stage_03_manifest_crawling.py` | 查询 Commons 分类树，写入 `categories` 与 `images`；按车型、根分类、category 和已覆盖递归深度记录完整子树 checkpoint，重跑时跳过已完成子树；MIME 过滤只清理本次增量抓取的记录 |
 | `img_crawling` | `stage_04_img_crawler.py` | 下载图片，更新 `images.download_status`，并将图片文件名与 `images.downloaded_path` 规范化为 Unicode NFC；macOS/APFS 上 NFC/NFD 指向同一 inode 时跳过文件重命名，仅将其视为路径别名 |
 | `siglip_filter` | `stage_05_siglip_image_filtering.py` | 用 SigLIP2 过滤内饰、局部细节等不适合训练的图片 |
@@ -230,6 +231,8 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 
 `stage_02` 使用 `config/manual_series_overrides.csv` 处理 Commons 命名差异、系列合并和人工修正。与 Commons 分类名相关的规则集中在 `pipeline/constants.py` 和 stage 脚本中；需要修改时先读现有逻辑，不要只凭文件名字符串硬编码。
 
+私铁与第三部门可通过 `config/manual_series_catalog.csv` 同时绕过运营公司车型列表解析和 Commons root 自动搜索。进行任何手工添加前，维护者或 LLM agent 必须先完整阅读 `docs/manual_series_catalog.md`，按其中的 Commons 真 root 标准核验并记录证据；不得只根据 category 名称猜测。`source_series` 保留来源名/别名，`series` 是下游规范标签；`entry_kind=new` 用于新车型，`merge` 用于别名同车或沿用已有车型。车辆谱系相同的继承/转籍版本即使视觉差异明显，也必须先 merge 到原始基础 `series`，只允许在 Stage 08 根据 operator、submodel、番台或特殊涂装 metadata 拆成 `fine_grained_series`；只有实际无谱系关系的同名异车才为基础 `series` 添加运营公司限定。当前小田急、东武、西武、东急已登记的车辆均已进入 `crawler.series_test_scope`；对 Commons 父子 root 保留独立基础 series 以维持来源和递归边界，Stage 08 再将东武50000、9000、70000 与东急2020近似车族合并成较粗训练标签。西武7000/8000系分别 merge 回东急9000系和小田急8000形。Stage 06 通过 `llm_labeling.locked_manual_metadata_columns` 将人工目录里的非空稳定字段按图片覆盖 LLM 输出；当前锁定 operator 日英文字段。
+
 `fine_grained_series` 用于更细粒度的训练标签；规则来源见 `config/manual_fine_grained_series.csv` 和 `fine_grain_series.rules_path` 配置。DINOv3 特征缓存只绑定 crop 图像和 `crop_id`，修改细粒度标签规则后通常只需重跑 `fine_grain_series`、`loss_tracking` 与后续噪声分析阶段，不需要重跑 `feature_extraction`。
 
 ## 数据库概要
@@ -251,6 +254,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 - `images.excluded` / `exclude_reason`：关键词与 SigLIP2 等过滤结果。
 - `images.siglip_processed`：SigLIP2 图片过滤是否已处理。
 - `images.llm_metadata_processed`：Stage 06 是否已将分类路径 metadata 回写到该图片；迁移时既有图片标记为已处理，新抓取图片默认未处理。
+- `images.manual_metadata_json`：人工车型目录随 manifest 写入的逐图稳定 metadata；Stage 06 只按 `llm_labeling.locked_manual_metadata_columns` 覆盖对应 LLM 字段，并会对已处理图片重新强制应用锁定值。
 - `images.download_status`：`not_started`、`downloaded`、`failed`、`missing_url`。
 - `images.downloaded_path`：相对 `path.data_root` 的图片路径，通常形如 `img/<series>/<file>`。
 - `crops.crop_status`：`pending`、`ok`、`rejected`。
@@ -259,15 +263,16 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 ## 配置要点
 
 - `path.in_project_root` 与 `path.data_root` 控制生成数据根目录；`in_project_root: true` 时 `data_root` 相对项目根目录解析，`false` 时 `data_root` 必须是绝对路径，适合 RunPod volume 挂载。
-- `path.db_path`、`path.raw_img_dir`、`path.cache_dir`、`path.model_dir`、CSV、review 输出和 checkpoint 路径相对 `path.data_root` 解析；`manual_series_overrides_path`、`fine_grain_series.rules_path` 等代码/配置文件仍相对项目根目录解析。
+- `path.db_path`、`path.raw_img_dir`、`path.cache_dir`、`path.model_dir`、CSV、review 输出和 checkpoint 路径相对 `path.data_root` 解析；`manual_series_catalog_path`、`manual_series_overrides_path`、`fine_grain_series.rules_path` 等代码/配置文件仍相对项目根目录解析。
 - `crawler.active_operators` 控制当前纳入的数据范围。
 - `crawler.manifest_max_depth`、`manifest_max_files_per_category` 控制 Commons 分类递归与每分类文件上限；`crawler.manifest_reprocess` 控制是否忽略 category checkpoint 并覆盖重爬 manifest。
 - `image_filtering.*` 控制 SigLIP2 图片过滤。
 - `llm_labeling.*` 控制 OpenAI 元数据抽取，包括是否为 Responses API 启用 `web_search` 工具。
+- `llm_labeling.locked_manual_metadata_columns` 仅接受 Stage 06 的 detail 字段名；对应人工目录值非空时按图片优先于 LLM，未提供人工值的字段仍由 category path + LLM 决定。
 - `fine_grain_series.*` 控制细粒度车型标签规则。
 - `gdino.*` 控制 Grounding-DINO 检测阈值、NMS 与批大小。
 - `noise_detection.*` 控制后续 DINO 特征缓存和 small-loss 噪声检测实验；`image_size` 控制特征提取阶段输入 processor 的正方形 resize/crop 分辨率，修改后需要重跑 `feature_extraction`；`feature_cache_shard_size` 控制特征提取阶段 `.pt` 分片保存后再聚合为单文件缓存。训练标签 id 在 `loss_tracking` 每轮根据当前数据库标签动态生成，并保存到该轮 loss analysis 目录的 `label_map.json`。`loss_tracking` 会按 `noise_detection.exclude_manual_noise` / `exclude_predicted_noise` 过滤人工噪声与上一轮 LR 预测噪声；`manual_corrected_label` 会覆盖原标签并保留为训练样本。详细设计见 `docs/noise_review_loop.md`。
-- `logistic_regression_filter.*` 控制人工复核标签上的 Logistic Regression 噪声筛选实验。
+- `logistic_regression_filter.*` 控制人工复核标签上的 Logistic Regression 噪声筛选实验。Stage 12 全量保留本轮复核样本；历史复核标签先连接本轮 loss feature，再按 `historical_sampling.score_column` 分位分桶，并按本轮同类样本数与 `sample_to_current_ratio` 的比例抽样。抽样后的训练集才执行最小样本数检查。
 - `old_noise_recovery.*` 控制旧 LR 噪声恢复复核：从指定 loss round 读取线性头 artifact，用完整 DINO 特征缓存探测由其他历史 LR 模型留下的高置信噪声，生成 review CSV。探测结果不自动改变筛选状态；专用 Gradio UI 写入的人工 `ok`、噪声结论或纠正标签才会影响后续训练和导出。
 - `label_metadata_translation.review_file_path` 控制新 label 翻译队列 CSV 路径。该阶段从 crop 的当前有效 label 扫描缺项，稳定的 `wiki_title` 仅用于辅助翻译。operator 直接按有效 label 聚合 Stage 06 的 `images.operator_en` / `images.operator_jp`；英文名已在 `label_metadata` 术语表中时，只接受与规范日文名匹配的识别结果并复用规范中文名；同一英文名存在多个未知日文写法时选择该 label 内出现次数最多者，未知中文名保留空字符串供人工填写。完整行使用 `INSERT ... ON CONFLICT DO NOTHING` 回写，已有规范记录不可被自动覆盖。
 - `crop_duplicate_detection.*` 控制最终导出前的重复 crop 解析。分组只在相同 `images.sha1`、detector model 与 NMS 配置内进行，并用 `bbox_iou_threshold` 容忍重复图片分别推理时的微小 bbox 浮动；人工 `bad_crop` / `out_of_label_space` 成员在分组前逐条忽略，过滤后少于两个成员的组不会写表。`prediction_model_dir` 指向已有自包含分类 artifact；全局 top-k 与候选 label 内重归一化结果只作为人工建议。同标签组自动设为 `auto_resolved`，跨标签组必须在 `tools/crop_duplicate_review_gradio.py` 中确认，或将单个成员/整组原地标记为 `bad_crop` / `out_of_label_space`；`require_review_complete_before_store` 为 true 时 Stage 16 遇到 pending 组直接中断。

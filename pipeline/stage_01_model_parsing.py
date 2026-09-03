@@ -1,11 +1,34 @@
 import httpx
 import re
 import json
+import os
 import pandas as pd
 import utils
 import asyncio
 import constants
 logger = utils.get_logger("stage_01_model_parsing")
+
+
+MANUAL_ENTRY_KINDS = {"new", "merge"}
+MANUAL_SERIES_REQUIRED_COLUMNS = {
+    "source_series",
+    "series",
+    "entry_kind",
+    "wiki_title",
+    "full_name",
+    "status",
+    "type",
+    "subtype",
+    "operator_jp",
+    "operator_en",
+    "commons_root_category",
+}
+MANUAL_SERIES_OPTIONAL_METADATA_COLUMNS = [
+    "submodel",
+    "bandai",
+    "special_formation",
+    "special_livery",
+]
 
 
 def fetch_wikitext(page_title: str) -> str:
@@ -182,6 +205,151 @@ def _row_quality(row: pd.Series) -> tuple:
     )
 
 
+def _split_manual_list(value: str) -> list[str]:
+    return [item.strip() for item in str(value).split("|") if item.strip()]
+
+
+def load_manual_series_catalog(path: str | os.PathLike) -> pd.DataFrame:
+    """Load explicitly curated series rows that bypass Wikipedia/root discovery."""
+    catalog_path = utils.join_project_root(path)
+    if not os.path.exists(catalog_path):
+        raise FileNotFoundError(f"未找到人工车型目录：{catalog_path}")
+
+    catalog = pd.read_csv(catalog_path, dtype=str, keep_default_na=False)
+    missing = MANUAL_SERIES_REQUIRED_COLUMNS - set(catalog.columns)
+    if missing:
+        raise ValueError(f"人工车型目录缺少列：{sorted(missing)}")
+    if catalog.empty:
+        return pd.DataFrame(
+            columns=[
+                "source_series",
+                "series",
+                "entry_kind",
+                "wiki_title",
+                "full_name",
+                "status",
+                "type",
+                "subtype",
+                "operator_page_title",
+                "operator_jp",
+                "operator_en",
+                "commons_root_category",
+                *MANUAL_SERIES_OPTIONAL_METADATA_COLUMNS,
+            ]
+        )
+
+    catalog = catalog.copy()
+    for col in MANUAL_SERIES_OPTIONAL_METADATA_COLUMNS:
+        if col not in catalog:
+            catalog[col] = ""
+        catalog[col] = catalog[col].fillna("").astype(str).str.strip()
+    for col in MANUAL_SERIES_REQUIRED_COLUMNS:
+        catalog[col] = catalog[col].str.strip()
+    catalog["operator_page_title"] = pd.Series(
+        [[] for _ in range(len(catalog))],
+        index=catalog.index,
+        dtype=object,
+    )
+
+    for row_number, row in catalog.iterrows():
+        csv_row = row_number + 2
+        required_values = [
+            "source_series",
+            "series",
+            "entry_kind",
+            "wiki_title",
+            "type",
+            "operator_jp",
+            "operator_en",
+            "commons_root_category",
+        ]
+        empty = [col for col in required_values if not row[col]]
+        if empty:
+            raise ValueError(f"人工车型目录第 {csv_row} 行存在空值：{empty}")
+        if row["entry_kind"] not in MANUAL_ENTRY_KINDS:
+            raise ValueError(
+                f"人工车型目录第 {csv_row} 行 entry_kind 必须是 new 或 merge"
+            )
+        if row["type"] not in constants.POWER_TYPE_MAP:
+            raise ValueError(
+                f"人工车型目录第 {csv_row} 行 type 不受支持：{row['type']!r}"
+            )
+        if row["commons_root_category"].startswith("Category:"):
+            raise ValueError(
+                f"人工车型目录第 {csv_row} 行 commons_root_category 不应包含 Category: 前缀"
+            )
+
+        operators_jp = _split_manual_list(row["operator_jp"])
+        operators_en = _split_manual_list(row["operator_en"])
+        if len(operators_jp) != len(operators_en):
+            raise ValueError(
+                f"人工车型目录第 {csv_row} 行 operator_jp/operator_en 数量不一致"
+            )
+        catalog.at[row_number, "operator_jp"] = operators_jp
+        catalog.at[row_number, "operator_en"] = operators_en
+        if not row["full_name"]:
+            catalog.at[row_number, "full_name"] = row["wiki_title"]
+
+    duplicate_keys = catalog.duplicated(
+        subset=["source_series", "wiki_title", "commons_root_category"],
+        keep=False,
+    )
+    if duplicate_keys.any():
+        duplicates = catalog.loc[
+            duplicate_keys,
+            ["source_series", "wiki_title", "commons_root_category"],
+        ].to_dict(orient="records")
+        raise ValueError(f"人工车型目录存在重复来源条目：{duplicates}")
+
+    return catalog[
+        [
+            "source_series",
+            "series",
+            "entry_kind",
+            "wiki_title",
+            "full_name",
+            "status",
+            "type",
+            "subtype",
+            "operator_page_title",
+            "operator_jp",
+            "operator_en",
+            "commons_root_category",
+            *MANUAL_SERIES_OPTIONAL_METADATA_COLUMNS,
+        ]
+    ]
+
+
+def append_manual_series_catalog(
+    parsed_series: pd.DataFrame,
+    manual_catalog: pd.DataFrame,
+) -> pd.DataFrame:
+    """Append curated roots while making canonical-label collisions explicit."""
+    if manual_catalog.empty:
+        return parsed_series
+
+    rows = [parsed_series]
+    known_series = set(parsed_series["series"].astype(str))
+    for _, manual_row in manual_catalog.iterrows():
+        series = manual_row["series"]
+        entry_kind = manual_row["entry_kind"]
+        if entry_kind == "new" and series in known_series:
+            raise ValueError(
+                f"人工车型 {manual_row['source_series']!r} 声明为 new，"
+                f"但规范 series {series!r} 已存在；同车/别名请改用 merge，"
+                "同名异车请为 series 添加运营公司限定"
+            )
+        if entry_kind == "merge" and series not in known_series:
+            raise ValueError(
+                f"人工车型 {manual_row['source_series']!r} 要 merge 到不存在的 "
+                f"series {series!r}；请检查名称或先添加 new 条目"
+            )
+        rows.append(manual_row.to_frame().T)
+        known_series.add(series)
+
+    return pd.concat(rows, ignore_index=True, sort=False)
+
+
 
 
 # ================== pipeline主函数 ==================
@@ -286,6 +454,17 @@ def main(config = None):
 
     final_df = pd.DataFrame(merged_rows).reset_index(drop=True)
     logger.info(f"去重前重复行 {len(duplicate_rows)} 条；去重后剩余重复 series {final_df.duplicated(subset=['series']).sum()} 条")
+
+    manual_catalog = load_manual_series_catalog(
+        config["path"]["manual_series_catalog_path"]
+    )
+    final_df = append_manual_series_catalog(final_df, manual_catalog)
+    logger.info(
+        "已追加人工车型目录 %d 条；当前共有 %d 个抓取入口、%d 个规范 series",
+        len(manual_catalog),
+        len(final_df),
+        final_df["series"].nunique(),
+    )
     
     export_df = final_df.copy()
     # 对 operator这列列表进行json序列化

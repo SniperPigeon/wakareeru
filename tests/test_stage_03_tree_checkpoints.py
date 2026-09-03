@@ -76,3 +76,24 @@ def test_subtree_checkpoint_keeps_deepest_completed_depth() -> None:
     assert stage_03.get_subtree_checkpoint_depth(
         conn, "0系", "Shinkansen 0", "Shinkansen 0"
     ) == -1
+
+
+def test_private_railway_parent_roots_exclude_separately_catalogued_subseries() -> None:
+    cases = [
+        ("東武50000型", "Tobu 50070 series", "tobu 50070 series"),
+        ("東武9000型", "Tobu 9050 series", "tobu 9050 series"),
+        ("東武70000型", "Tobu 70090 series", "tobu 70090 series"),
+        ("東急2020系", "Tokyu 6020 series", "tokyu 6020 series"),
+    ]
+
+    for series, category, pattern in cases:
+        assert stage_03.category_exclude_reason(
+            pd.Series({"series": series}), category
+        ) == f"category:wrong-series:{pattern}"
+
+    assert (
+        stage_03.category_exclude_reason(
+            pd.Series({"series": "東武50070型"}), "Tobu 50070 series"
+        )
+        is None
+    )

@@ -279,7 +279,7 @@ def test_migration_014_preserves_existing_duplicate_reviews() -> None:
     assert stored == (1, "preserved", "confirmed", "B", None, "checked")
 
 
-def test_migration_014_handles_latest_schema_created_at_version_12() -> None:
+def test_migrations_handle_latest_schema_created_at_version_12() -> None:
     project_root = Path(__file__).resolve().parents[1]
     schema_path = project_root / "config" / "schema.sql"
     migrations_dir = project_root / "config" / "migrations"
@@ -298,4 +298,4 @@ def test_migration_014_handles_latest_schema_created_at_version_12() -> None:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
 
     assert "exclusion_reason" in columns
-    assert version == 14
+    assert version == 15

@@ -52,6 +52,8 @@ def load_commons_models(path: str = COMMONS_MODEL_CSV) -> pd.DataFrame:
             df[col] = df[col].apply(lambda v: parse_literal(v, []))
     if "commons_operator_roots" in df:
         df["commons_operator_roots"] = df["commons_operator_roots"].apply(lambda v: parse_literal(v, {}))
+    if "manual_metadata_json" not in df:
+        df["manual_metadata_json"] = "{}"
     if "needs_review" in df:
         df["needs_review"] = df["needs_review"].apply(lambda v: str(v).strip().lower() == "true")
     if "type" in df:
@@ -236,6 +238,7 @@ def build_image_records(
             "wiki_title": row.get("wiki_title"),
             "power_type": None if pd.isna(row.get("power_type")) else row.get("power_type"),
             "operator_en_json": json.dumps(row.get("operator_en", []), ensure_ascii=False),
+            "manual_metadata_json": row.get("manual_metadata_json", "{}"),
             "root_category": row["commons_root_category"],
             "category": category,
             "category_path_json": json.dumps(category_path, ensure_ascii=False),
@@ -335,11 +338,11 @@ def upsert_image_records(
         conn.execute(
             """
             INSERT INTO images(
-                series, wiki_title, power_type, operator_en_json, root_category, category, category_path_json, file_title,
+                series, wiki_title, power_type, operator_en_json, manual_metadata_json, root_category, category, category_path_json, file_title,
                 pageid, image_url, thumb_url, mime, width, height, size, sha1, extmetadata_json,
                 excluded, exclude_reason, fetched_at
             ) VALUES (
-                :series, :wiki_title, :power_type, :operator_en_json, :root_category, :category, :category_path_json, :file_title,
+                :series, :wiki_title, :power_type, :operator_en_json, :manual_metadata_json, :root_category, :category, :category_path_json, :file_title,
                 :pageid, :image_url, :thumb_url, :mime, :width, :height, :size, :sha1, :extmetadata_json,
                 :excluded, :exclude_reason, :fetched_at
             )
@@ -354,6 +357,11 @@ def upsert_image_records(
                 size=excluded.size,
                 sha1=excluded.sha1,
                 category_path_json=excluded.category_path_json,
+                manual_metadata_json=CASE
+                    WHEN excluded.manual_metadata_json <> '{}'
+                    THEN excluded.manual_metadata_json
+                    ELSE images.manual_metadata_json
+                END,
                 extmetadata_json=excluded.extmetadata_json,
                 excluded=excluded.excluded,
                 exclude_reason=excluded.exclude_reason,
