@@ -122,6 +122,7 @@ crawler:
     - 小田急60000形
     - 東武9000型
     - 東武9050型
+    - 東武20000系
     - 東武50050型
     - 東武50070型
     - 東武70000型
@@ -395,7 +396,7 @@ trainer:
     # "latest_best" / "latest" = trainer.latest_run_pointer指向的最新run中最后一个phase的best checkpoint。
     # 也可以填写相对path.data_root的具体checkpoint路径。
     checkpoint_path: "latest_best"
-    output_dir: "model/wakareeru-0.5.0-alpha.2"
-    artifact_version: "0.5.0-alpha.2"
+    output_dir: "model/wakareeru-0.5.0-alpha.3"
+    artifact_version: "0.5.0-alpha.3"
     force: false
   

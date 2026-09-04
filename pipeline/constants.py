@@ -178,6 +178,7 @@ SERIES_CATEGORY_EXCLUDE_PATTERNS = {
     # separately so crawler.series_test_scope can enable only through-service stock.
     "東武9000型": ("tobu 9050 series",),
     "東武10000型": ("tobu 10030 series", "tobu 10080 series"),
+    "東武20000系": ("tobu 20400 series", "alpico kotsu 20100 series"),
     "東武50000型": (
         "tobu 50050 series",
         "tobu 50070 series",

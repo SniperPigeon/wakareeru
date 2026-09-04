@@ -197,7 +197,7 @@ series/root 以维持来源和递归边界，Stage 08 再合并为车族级训�
 | `Odakyu 60000 series MSE` | 64 / 2 | 千代田线/有乐町线直通特急；进 scope |
 | `Odakyu 70000 series GSE` | 21 / 1 | Romancecar GSE |
 
-东武采用以下 22 个 root。50000、70000、9000 和 10000 系列的父 root
+东武采用以下 23 个 root。50000、70000、9000、10000 和 20000 系列的父 root
 含有独立子型；为了避免父 root 递归与子型 root 重复，父 series 通过
 `SERIES_CATEGORY_EXCLUDE_PATTERNS` 跳过已单独登记的子树：
 
@@ -215,6 +215,7 @@ series/root 以维持来源和递归边界，Stage 08 再合并为车族级训�
 | `Tobu 10000 series` | 23 / 14 | 排除单独登记的 10030/10080 子树 |
 | `Tobu 10030 series` | 28 / 14 | 10030/10050 车族 |
 | `Tobu 10080 series` | 2 / 0 | merge 到东武10030型 |
+| `Tobu 20000 series` | 22 / 4 | 历史日比谷线直通车；保留 20050/20070 子树，排除已单列的 20400 与 Alpico 20100 子树 |
 | `Tobu 20400 series` | 10 / 4 | 20000 系改造车；子分类为 20410--20440 |
 | `Tobu 30000 series` | 71 / 0 | 历史半藏门线直通车 |
 | `Tobu 50000 series` | 41 / 3 | 地上基本型；排除 50050/50070/50090 子树 |
@@ -228,6 +229,12 @@ series/root 以维持来源和递归边界，Stage 08 再合并为车族级训�
 
 东武90000系在核验日尚未开始营业，Commons 也没有非空车型 root，因此暂不写入
 人工目录；待营业照片形成稳定分类后再核验。
+
+2026-09-04 追加核验 `Alpico Kotsu 20100 series`，Commons API 返回
+23 files / 0 subcats，直接父分类同时包含 `Rolling stock of Alpico Kotsu`
+与 `Tobu 20000 series`。该 root 以 `merge` 并入基础 `東武20000系`，
+Stage 08 再根据锁定的 `operator_en=Alpico Kotsu` 拆为独立训练标签
+`アルピコ交通20100形`。东武父 root 递归时排除该子树，避免重复抓取。
 
 西武采用以下 14 个 root，直接父分类均能回到
 `Electric multiple units of Seibu Railway`：
@@ -264,8 +271,9 @@ series/root 以维持来源和递归边界，Stage 08 再合并为车族级训�
 | `Tokyu 6020 series` | 19 / 0 | 大井町线 |
 | `Tōkyū 9000 series` | 30 / 20 | 东急已退役原车谱；西武7000以 merge 追加 |
 
-本批所有 51 个规范 series 均纳入 scope。Stage 08 将东武50000/50050/50070/50090、
+扩展后共 52 个规范 series 均纳入 scope。Stage 08 将东武50000/50050/50070/50090、
 东武9000/9050、东武70000/70090 以及东急2020/3020/6020 分别合并为车族级训练标签。
+东武20000系中的 Alpico 来源则按 operator 拆为 `アルピコ交通20100形`。
 
 ## CSV 字段
 
